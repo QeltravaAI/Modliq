@@ -127,8 +127,17 @@ router.post("/optimization/run", async (req, res) => {
         .json({ success: false, error: "filename is required" });
     }
 
+    // Read the uploaded CSV and send its content to the ML engine so it
+    // works across separate services (no shared filesystem required).
+    let fileContent = null;
+    const localPath = `uploads/${filename}`;
+    if (fs.existsSync(localPath)) {
+      fileContent = fs.readFileSync(localPath).toString("base64");
+    }
+
     const payload = {
       filename,
+      file_content: fileContent,
       template_id: template_id || "yield_optimizer",
       target: intent?.target,
       features: intent?.features && intent.features.length

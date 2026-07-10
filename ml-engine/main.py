@@ -5,6 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
 import math
+import io
+import base64
 
 from sklearn.model_selection import (
     train_test_split,
@@ -738,6 +740,8 @@ class OptimizeRequest(BaseModel):
 
     filename: str
 
+    file_content: str | None = None
+
     template_id: str = "yield_optimizer"
 
     target: str | None = None
@@ -778,9 +782,14 @@ def optimize_yield(request: OptimizeRequest):
             request.template_id, TEMPLATES["yield_optimizer"]
         )
 
-        file_path = f"../backend/uploads/{request.filename}"
-
-        df = pd.read_csv(file_path)
+        # Load dataset: prefer base64 content (cross-service friendly),
+        # fall back to local file path for local/dev runs.
+        if request.file_content:
+            raw = base64.b64decode(request.file_content)
+            df = pd.read_csv(io.StringIO(raw.decode("utf-8")))
+        else:
+            file_path = f"../backend/uploads/{request.filename}"
+            df = pd.read_csv(file_path)
 
         df = df.dropna()
 
