@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +26,7 @@ import {
   CircleX,
 } from "lucide-react";
 
-export default function ResultsPage() {
+function ResultsContent() {
   const params = useSearchParams();
   const id = params.get("id");
 
@@ -340,5 +340,19 @@ function Section({
       {subtitle && <p className="text-gray-500 mb-6">{subtitle}</p>}
       {children}
     </div>
+  );
+}
+
+export default function ResultsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center text-gray-500">
+          Loading results...
+        </div>
+      }
+    >
+      <ResultsContent />
+    </Suspense>
   );
 }

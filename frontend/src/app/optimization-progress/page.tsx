@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +13,7 @@ import { parseIntent, runOptimization } from "@/services/optimization.service";
 
 import { Cpu, CheckCircle2, Loader2 } from "lucide-react";
 
-export default function OptimizationProgressPage() {
+function OptimizationProgressContent() {
   const router = useRouter();
   const params = useSearchParams();
 
@@ -150,5 +150,19 @@ export default function OptimizationProgressPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function OptimizationProgressPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center text-gray-500">
+          Loading optimization...
+        </div>
+      }
+    >
+      <OptimizationProgressContent />
+    </Suspense>
   );
 }
