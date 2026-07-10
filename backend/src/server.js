@@ -14,6 +14,9 @@ const dashboardRoutes =
 const resultsRoutes =
 require("./routes/results.routes");
 
+const apiRoutes =
+  require("./routes/api.routes");
+
 const app = express();
 
 
@@ -32,6 +35,8 @@ app.use("/", dashboardRoutes);
 
 app.use("/", resultsRoutes);
 
+app.use("/api/v1", apiRoutes);
+
 
 // TEST ROUTE
 app.get("/", (req, res) => {
@@ -44,10 +49,11 @@ app.get("/", (req, res) => {
 
 
 // SERVER
-app.listen(5000, () => {
+const PORT = process.env.PORT || 5000;
+
+app.listen(PORT, () => {
 
   console.log(
-    "Server running on port 5000"
+    `Server running on port ${PORT}`
   );
-
 });

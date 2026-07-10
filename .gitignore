@@ -25,6 +25,9 @@ uploads/
 *.xls
 *.json
 
+# Keep the tracked demo dataset (served by the frontend)
+!frontend/public/manufacturing_data.csv
+
 # =====================================
 # Logs
 # =====================================

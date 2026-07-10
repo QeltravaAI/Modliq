@@ -21,7 +21,7 @@ router.post("/train", async (req, res) => {
 
     // ML ENGINE CALL
     const response = await axios.post(
-      "http://127.0.0.1:8000/train",
+      process.env.ML_ENGINE_URL || "http://127.0.0.1:8000" + "/train",
       {
         filename,
         target_column,

@@ -14,15 +14,15 @@ export default function QuickActions() {
       icon: <Upload />,
     },
     {
-      title: "Train Model",
+      title: "Set Goal",
       icon: <BrainCircuit />,
     },
     {
-      title: "AI Copilot",
+      title: "Ask Copilot",
       icon: <Bot />,
     },
     {
-      title: "Documents",
+      title: "Templates",
       icon: <FileText />,
     },
   ];

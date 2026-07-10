@@ -77,7 +77,7 @@ export default function HomePage() {
             </h1>
 
             <p className="text-gray-500 mt-2">
-              Your ML platform at a glance
+              Your optimization studio at a glance
             </p>
 
           </div>
@@ -155,17 +155,17 @@ export default function HomePage() {
                 <div>
 
                   <h2 className="text-3xl font-bold text-gray-900">
-                    Latest Model Result
+                    Latest Optimization Run
                   </h2>
 
                   <p className="text-gray-500 mt-2">
-                    Real-time ML training insights
+                    Recommended settings from your last goal
                   </p>
 
                 </div>
 
                 <div className="px-5 py-2 rounded-full bg-green-100 text-green-700 font-semibold">
-                  Trained Successfully
+                  Optimized Successfully
                 </div>
 
               </div>

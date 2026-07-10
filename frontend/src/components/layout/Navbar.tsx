@@ -27,12 +27,12 @@ export default function Navbar() {
 
           {/* Name */}
           <div>
-            <p className="font-semibold text-sm text-gray-800">
-              Admin
+          <p className="font-semibold text-sm text-gray-800">
+              Process Copilot
             </p>
 
             <p className="text-xs text-gray-500">
-              ML Engineer
+              Process Optimization Engineer
             </p>
           </div>
         </div>
