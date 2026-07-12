@@ -7,6 +7,10 @@ import numpy as np
 import math
 import io
 import base64
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from sklearn.model_selection import (
     train_test_split,
@@ -42,7 +46,14 @@ from sklearn.metrics import (
 
 from sklearn.preprocessing import LabelEncoder
 
-app = FastAPI()
+import sys
+import os
+sys.path.insert(0, os.path.dirname(__file__))
+
+from routers.qc_studio import router as qc_router
+from routers.goal import router as goal_router
+
+app = FastAPI(title="Modliq ML Engine", version="1.0.0")
 
 # ==================================================
 # CORS
@@ -54,6 +65,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ==================================================
+# QUALITY STUDIO ROUTER
+# ==================================================
+app.include_router(qc_router)
+app.include_router(goal_router)
 
 # ==================================================
 # REQUEST MODEL
@@ -793,12 +810,16 @@ def optimize_yield(request: OptimizeRequest):
 
         df = df.dropna()
 
-        if request.target:
-            target = request.target
-        else:
-            target = _resolve_target(
-                template, list(df.columns)
-            )
+        target = request.target
+        if not target or target not in df.columns:
+            target = _resolve_target(template, list(df.columns))
+
+        if not target or target not in df.columns:
+            lower_target = target.lower() if target else ""
+            for col in df.columns:
+                if col.lower() == lower_target:
+                    target = col
+                    break
 
         if not target or target not in df.columns:
             return {
@@ -813,6 +834,22 @@ def optimize_yield(request: OptimizeRequest):
         features = [
             f for f in features if f in df.columns
         ]
+
+        if not features:
+            normalized_features = []
+            lower_requested = [f.lower() for f in request.features] if request.features else []
+            for col in df.columns:
+                if col.lower() in lower_requested:
+                    normalized_features.append(col)
+
+            if not normalized_features:
+                for col in df.columns:
+                    if col.lower() != target.lower():
+                        normalized_features.append(col)
+                        if len(normalized_features) >= 5:
+                            break
+
+            features = normalized_features
 
         if not features:
             return {
