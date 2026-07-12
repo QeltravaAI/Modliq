@@ -252,10 +252,19 @@ apiV1.post('/optimization/run', async (req, res) => {
     const dataset = datasetStore.getDataset(filename);
     if (dataset) {
       localPath = dataset.filePath;
+    } else if (filename === 'manufacturing_data.csv' || filename === 'demo_dataset.csv') {
+      localPath = path.join(uploadDir, '..', '..', 'ml-engine', 'data', 'demo_dataset.csv');
     }
 
     if (fs.existsSync(localPath)) {
       fileContent = fs.readFileSync(localPath).toString('base64');
+    }
+
+    if (!fileContent) {
+      return res.status(400).json({
+        success: false,
+        error: `Dataset file not found on server: ${localPath}. Upload a fresh dataset or load the demo.`,
+      });
     }
 
     const payload = {
@@ -292,10 +301,15 @@ apiV1.post('/optimization/run', async (req, res) => {
 
     res.json({ success: true, id, result });
   } catch (error: any) {
-    console.error(error);
+    console.error('Optimization run error:', error);
+    const message =
+      error.response?.data?.error ||
+      error.response?.data?.message ||
+      error.message ||
+      'Optimization failed';
     res.status(500).json({
       success: false,
-      error: error.response?.data?.error || 'Optimization failed',
+      error: message,
     });
   }
 });
