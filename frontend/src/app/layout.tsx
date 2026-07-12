@@ -12,8 +12,6 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-import NextAuthProvider from "@/components/providers/NextAuthProvider";
-
 export const metadata: Metadata = {
   title: "Modliq - Yield Optimization & Quality Engineering",
   description: "Manufacturing yield-optimization and quality-engineering product for process engineers.",
@@ -30,7 +28,7 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <NextAuthProvider>{children}</NextAuthProvider>
+        {children}
       </body>
     </html>
   );

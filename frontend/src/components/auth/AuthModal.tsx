@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
+import { createClient } from '@/utils/supabase/client';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -17,6 +17,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const supabase = createClient();
 
   if (!isOpen) return null;
 
@@ -25,71 +26,65 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
     setError('');
     setLoading(true);
 
-    if (isLogin) {
-      const res = await signIn('credentials', {
-        redirect: false,
-        email,
-        password,
-      });
-
-      if (res?.error) {
-        setError('Invalid credentials');
-      } else {
-        const sessionRes = await fetch('/api/auth/session');
-        const session = await sessionRes.json();
-        if (session?.user?.id) {
-          router.push(`/${session.user.id}/modliq-console/dashboard`);
-          onClose();
-        }
-      }
-    } else {
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, password }),
-      });
-
-      if (res.ok) {
-        const loginRes = await signIn('credentials', {
-          redirect: false,
+    try {
+      if (isLogin) {
+        const { error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
-        if (!loginRes?.error) {
-          const sessionRes = await fetch('/api/auth/session');
-          const session = await sessionRes.json();
-          if (session?.user?.id) {
-            router.push(`/${session.user.id}/modliq-console/dashboard`);
-            onClose();
-          }
+
+        if (error) {
+          setError(error.message || 'Invalid credentials');
+        } else {
+          router.push(`/${email}/modliq-console/dashboard`);
+          onClose();
         }
       } else {
-        const data = await res.json();
-        setError(data.error || 'Failed to register');
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              name,
+            },
+          },
+        });
+
+        if (error) {
+          setError(error.message || 'Failed to register');
+        } else {
+          router.push(`/${email}/modliq-console/dashboard`);
+          onClose();
+        }
       }
+    } catch (err: any) {
+      setError(err.message || 'An unexpected error occurred');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleDemoLogin = async () => {
     setError('');
     setLoading(true);
-    const res = await signIn('credentials', {
-      redirect: false,
-      isDemo: 'true',
-    });
 
-    if (res?.error) {
-      setError('Demo login failed. Did you run the seed script?');
-    } else {
-      const sessionRes = await fetch('/api/auth/session');
-      const session = await sessionRes.json();
-      if (session?.user?.id) {
-        router.push(`/${session.user.id}/modliq-console/dashboard`);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: 'demo@modliq.com',
+        password: 'modliqdemo',
+      });
+
+      if (error) {
+        setError('Demo login failed. Ensure demo@modliq.com exists in Supabase.');
+      } else {
+        router.push(`/demo@modliq.com/modliq-console/dashboard`);
         onClose();
       }
+    } catch (err: any) {
+      setError(err.message || 'Demo login failed');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (

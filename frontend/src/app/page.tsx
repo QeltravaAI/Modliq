@@ -15,25 +15,38 @@ import {
   ChevronUp,
 } from "lucide-react";
 import AuthModal from "@/components/auth/AuthModal";
-import { useSession } from "next-auth/react";
+import { createClient } from "@/utils/supabase/client";
 
 export default function HomeOrLandingPage() {
   const router = useRouter();
   const [isMounted, setIsMounted] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
-
-  const { data: session, status } = useSession();
+  const [session, setSession] = useState<any>(null);
 
   const landingRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
+  const supabase = createClient();
 
   useEffect(() => {
     setIsMounted(true);
-    if (status === "authenticated" && session?.user?.id) {
-      router.push(`/${session.user.id}/modliq-console/dashboard`);
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, [supabase]);
+
+  useEffect(() => {
+    if (session?.user?.email) {
+      router.push(`/${session.user.email}/modliq-console/dashboard`);
     }
-  }, [router, status, session]);
+  }, [session, router]);
 
   // ── GSAP Landing animations ────────────────
   useGSAP(() => {

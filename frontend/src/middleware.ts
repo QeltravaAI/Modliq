@@ -1,34 +1,35 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { getToken } from 'next-auth/jwt';
+import { createClient } from '@/utils/supabase/middleware';
 
 export async function middleware(req: NextRequest) {
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
+  const { supabase, supabaseResponse } = createClient(req);
+
+  const { data: { session } } = await supabase.auth.getSession();
   const { pathname } = req.nextUrl;
 
   // Match routes like /[userId]/modliq-console/...
   const consoleRouteMatch = pathname.match(/^\/([^/]+)\/modliq-console/);
-  
+
   if (consoleRouteMatch) {
     const routeUserId = consoleRouteMatch[1];
-    
-    // If not logged in, redirect to home with a login prompt
-    if (!token) {
+
+    if (!session) {
       const url = req.nextUrl.clone();
       url.pathname = '/';
       url.searchParams.set('login', 'true');
       return NextResponse.redirect(url);
     }
-    
-    // If logged in but trying to access another user's workspace
-    if (token.id !== routeUserId && token.sub !== routeUserId) {
+
+    const userId = session.user?.email || session.user?.id;
+    if (userId && userId !== routeUserId) {
       const url = req.nextUrl.clone();
-      url.pathname = `/${token.id || token.sub}/modliq-console/dashboard`;
+      url.pathname = `/${userId}/modliq-console/dashboard`;
       return NextResponse.redirect(url);
     }
   }
 
-  return NextResponse.next();
+  return supabaseResponse;
 }
 
 export const config = {

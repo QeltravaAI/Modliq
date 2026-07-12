@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useSession, signOut } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
 import { 
   LayoutDashboard, 
   Upload, 
@@ -13,8 +13,9 @@ import {
   LogOut,
   User as UserIcon
 } from 'lucide-react';
-import React, { use } from 'react';
+import React, { use, useEffect, useState } from 'react';
 import Image from 'next/image';
+import { createClient } from '@/utils/supabase/client';
 
 export default function ConsoleLayout({
   children,
@@ -24,8 +25,27 @@ export default function ConsoleLayout({
   params: Promise<{ userId: string }>;
 }) {
   const pathname = usePathname();
-  const { data: session } = useSession();
+  const router = useRouter();
   const resolvedParams = use(params);
+  const [session, setSession] = useState<any>(null);
+  const supabase = createClient();
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, [supabase]);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    router.push('/');
+  };
 
   const navItems = [
     { name: 'Dashboard', href: `/${resolvedParams.userId}/modliq-console/dashboard`, icon: LayoutDashboard },
@@ -82,7 +102,7 @@ export default function ConsoleLayout({
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-slate-900 truncate">
-                {session?.user?.name || 'User'}
+                {session?.user?.email || 'User'}
               </p>
               <p className="text-xs text-slate-500 truncate">
                 {session?.user?.email || ''}
@@ -90,7 +110,7 @@ export default function ConsoleLayout({
             </div>
           </div>
           <button
-            onClick={() => signOut({ callbackUrl: '/' })}
+            onClick={handleSignOut}
             className="w-full mt-2 flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-red-600 transition-colors"
           >
             <LogOut size={16} />

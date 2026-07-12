@@ -1,13 +1,15 @@
 import { NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/lib/auth';
+import { cookies } from 'next/headers';
+import { createClient } from '@/utils/supabase/server';
 import prisma from '@/lib/prisma';
 
 export async function POST(request: Request) {
   try {
-    const session = await getServerSession(authOptions);
+    const cookieStore = await cookies();
+    const supabase = createClient(cookieStore);
+    const { data: { session } } = await supabase.auth.getSession();
 
-    if (!session || !session.user?.id) {
+    if (!session || !session.user?.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -18,9 +20,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'datasetId is required' }, { status: 400 });
     }
 
-    // Update user's activeDatasetId
+    const user = await prisma.user.findUnique({
+      where: { email: session.user.email },
+    });
+
+    if (!user) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
     await prisma.user.update({
-      where: { id: session.user.id },
+      where: { id: user.id },
       data: { activeDatasetId: datasetId },
     });
 
