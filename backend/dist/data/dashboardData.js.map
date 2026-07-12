@@ -1,0 +1,1 @@
+{"version":3,"file":"dashboardData.js","sourceRoot":"","sources":["../../src/data/dashboardData.ts"],"names":[],"mappings":";;;AAAa,QAAA,aAAa,GAAG;IAC3B,aAAa,EAAE,CAAC;IAChB,YAAY,EAAE,CAAC;IACf,gBAAgB,EAAE,CAAC;IACnB,eAAe,EAAE,CAAC;IAClB,gBAAgB,EAAE,EAAc;IAChC,cAAc,EAAE,EAAuC;IACvD,aAAa,EAAE,EAA2C;IAC1D,YAAY,EAAE,EAAW;IACzB,oBAAoB,EAAE,IAAW;CAClC,CAAC"}

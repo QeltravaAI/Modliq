@@ -57,6 +57,8 @@ out/
 # =====================================
 # Build Files
 # =====================================
+# Keep backend dist for Render deployment
+!backend/dist/
 dist/
 build/
 
