@@ -16,12 +16,23 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         if (credentials?.isDemo === 'true') {
-          const demoUser = await prisma.user.findFirst({
-            where: { isDemo: true, email: 'demo@modliq.com' },
+          const demoEmail = 'demo@modliq.com';
+          let demoUser = await prisma.user.findFirst({
+            where: { isDemo: true, email: demoEmail },
           });
-          
-          if (!demoUser) return null;
-          
+
+          if (!demoUser) {
+            const hashedPassword = await bcrypt.hash('modliqdemo', 10);
+            demoUser = await prisma.user.create({
+              data: {
+                name: 'Demo User',
+                email: demoEmail,
+                password: hashedPassword,
+                isDemo: true,
+              },
+            });
+          }
+
           return {
             id: demoUser.id,
             email: demoUser.email,
