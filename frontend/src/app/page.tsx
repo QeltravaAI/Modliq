@@ -38,7 +38,6 @@ export default function HomeOrLandingPage() {
   // ── GSAP Landing animations ────────────────
   useGSAP(() => {
     if (isMounted) {
-      // Hero section load
       gsap.from(".hero-el", {
         opacity: 0,
         y: 25,
@@ -46,22 +45,12 @@ export default function HomeOrLandingPage() {
         duration: 0.8,
         ease: "power3.out",
       });
-
-      // Feature cards stagger
-      gsap.from(".feature-card", {
-        opacity: 0,
-        y: 30,
-        stagger: 0.1,
-        duration: 0.8,
-        delay: 0.5,
-        ease: "power3.out",
-      });
     }
   }, { scope: landingRef, dependencies: [isMounted] });
 
   // ── GSAP Modal animation ──────────────────
   useGSAP(() => {
-    if (showLoginModal) {
+    if (showLoginModal && modalRef.current) {
       gsap.fromTo(modalRef.current,
         { scale: 0.9, opacity: 0 },
         { scale: 1, opacity: 1, duration: 0.4, ease: "back.out(1.5)" }
