@@ -43,8 +43,8 @@ export default function HomeOrLandingPage() {
   }, [supabase]);
 
   useEffect(() => {
-    if (session?.user?.email) {
-      router.push(`/${session.user.email}/modliq-console/dashboard`);
+    if (session?.user?.id) {
+      router.push(`/${session.user.id}/modliq-console/dashboard`);
     }
   }, [session, router]);
 

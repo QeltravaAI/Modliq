@@ -8,9 +8,8 @@ export async function middleware(req: NextRequest) {
   const { data: { session } } = await supabase.auth.getSession();
   const { pathname } = req.nextUrl;
 
-  // Match routes like /[userId]/modliq-console/...
   const consoleRouteMatch = pathname.match(/^\/([^/]+)\/modliq-console/);
-
+  
   if (consoleRouteMatch) {
     const routeUserId = consoleRouteMatch[1];
 
@@ -21,7 +20,7 @@ export async function middleware(req: NextRequest) {
       return NextResponse.redirect(url);
     }
 
-    const userId = session.user?.email || session.user?.id;
+    const userId = session.user?.id;
     if (userId && userId !== routeUserId) {
       const url = req.nextUrl.clone();
       url.pathname = `/${userId}/modliq-console/dashboard`;
