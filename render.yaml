@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: modliq-backend
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: ML_ENGINE_URL
+        value: https://modliq-ml-engine.onrender.com
+      - key: CLIENT_ORIGIN
+        value: https://modliq-frontend.vercel.app
+      - key: REQUEST_TIMEOUT_MS
+        value: 30000
