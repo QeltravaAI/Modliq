@@ -20,6 +20,7 @@ dotenv_1.default.config();
 const app = (0, express_1.default)();
 const port = process.env.PORT || 3001;
 const ML_ENGINE_URL = process.env.ML_ENGINE_URL || 'http://127.0.0.1:8000';
+console.log(`[backend] ML_ENGINE_URL=${ML_ENGINE_URL}`);
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
 // ==================================================
@@ -234,8 +235,23 @@ apiV1.post('/optimization/run', async (req, res) => {
         if (dataset) {
             localPath = dataset.filePath;
         }
-        if (fs_1.default.existsSync(localPath)) {
+        else if (filename === 'manufacturing_data.csv' || filename === 'demo_dataset.csv') {
+            localPath = path_1.default.join(uploadDir, '..', '..', 'ml-engine', 'data', 'demo_dataset.csv');
+        }
+        console.log(`[optimization] filename=${filename}, localPath=${localPath}, datasetFound=${!!dataset}`);
+        const fileStats = fs_1.default.existsSync(localPath) ? fs_1.default.statSync(localPath) : null;
+        if (fileStats && fileStats.isFile()) {
             fileContent = fs_1.default.readFileSync(localPath).toString('base64');
+            console.log(`[optimization] Loaded ${(fileContent.length / 1024).toFixed(1)} KB from ${localPath}`);
+        }
+        else {
+            console.log(`[optimization] File not found or not a file: ${localPath}`);
+        }
+        if (!fileContent) {
+            return res.status(400).json({
+                success: false,
+                error: `Dataset file not found on server: ${localPath}. Upload a fresh dataset or load the demo.`,
+            });
         }
         const payload = {
             filename: dataset ? dataset.filename : filename,
@@ -249,7 +265,9 @@ apiV1.post('/optimization/run', async (req, res) => {
             monthly_volume: monthly_volume || undefined,
             unit_value: unit_value || undefined,
         };
-        const response = await axios_1.default.post(`${ML_ENGINE_URL}/optimize-yield`, payload);
+        const response = await axios_1.default.post(`${ML_ENGINE_URL}/optimize-yield`, payload, {
+            timeout: parseInt(process.env.REQUEST_TIMEOUT_MS || '30000', 10),
+        });
         const result = response.data;
         if (!result || !result.success) {
             return res.status(400).json({
@@ -266,10 +284,14 @@ apiV1.post('/optimization/run', async (req, res) => {
         res.json({ success: true, id, result });
     }
     catch (error) {
-        console.error(error);
+        console.error('Optimization run error:', error);
+        const message = error.response?.data?.error ||
+            error.response?.data?.message ||
+            error.message ||
+            'Optimization failed';
         res.status(500).json({
             success: false,
-            error: error.response?.data?.error || 'Optimization failed',
+            error: message,
         });
     }
 });

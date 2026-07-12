@@ -18,6 +18,8 @@ const app = express();
 const port = process.env.PORT || 3001;
 const ML_ENGINE_URL = process.env.ML_ENGINE_URL || 'http://127.0.0.1:8000';
 
+console.log(`[backend] ML_ENGINE_URL=${ML_ENGINE_URL}`);
+
 app.use(cors());
 app.use(express.json());
 
@@ -256,8 +258,14 @@ apiV1.post('/optimization/run', async (req, res) => {
       localPath = path.join(uploadDir, '..', '..', 'ml-engine', 'data', 'demo_dataset.csv');
     }
 
-    if (fs.existsSync(localPath)) {
+    console.log(`[optimization] filename=${filename}, localPath=${localPath}, datasetFound=${!!dataset}`);
+
+    const fileStats = fs.existsSync(localPath) ? fs.statSync(localPath) : null;
+    if (fileStats && fileStats.isFile()) {
       fileContent = fs.readFileSync(localPath).toString('base64');
+      console.log(`[optimization] Loaded ${(fileContent.length / 1024).toFixed(1)} KB from ${localPath}`);
+    } else {
+      console.log(`[optimization] File not found or not a file: ${localPath}`);
     }
 
     if (!fileContent) {
@@ -280,7 +288,9 @@ apiV1.post('/optimization/run', async (req, res) => {
       unit_value: unit_value || undefined,
     };
 
-    const response = await axios.post(`${ML_ENGINE_URL}/optimize-yield`, payload);
+    const response = await axios.post(`${ML_ENGINE_URL}/optimize-yield`, payload, {
+      timeout: parseInt(process.env.REQUEST_TIMEOUT_MS || '30000', 10),
+    });
     const result = response.data;
 
     if (!result || !result.success) {

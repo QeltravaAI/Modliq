@@ -11,8 +11,8 @@ services:
       - key: PORT
         value: 3001
       - key: ML_ENGINE_URL
-        value: https://modliq-ml-engine.onrender.com
+        value: https://modliq.onrender.com
       - key: CLIENT_ORIGIN
-        value: https://modliq-frontend.vercel.app
+        value: https://modliq.vercel.app
       - key: REQUEST_TIMEOUT_MS
         value: 30000
