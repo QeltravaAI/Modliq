@@ -50,7 +50,6 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
 
-from routers.qc_studio import router as qc_router
 from routers.goal import router as goal_router
 
 app = FastAPI(title="Modliq ML Engine", version="1.0.0")
@@ -71,7 +70,6 @@ app.add_middleware(
 # ==================================================
 # QUALITY STUDIO ROUTER
 # ==================================================
-app.include_router(qc_router)
 app.include_router(goal_router)
 
 # ==================================================
