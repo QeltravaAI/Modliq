@@ -22,9 +22,8 @@ const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'https://modliq.vercel.app';
 console.log(`[backend] ML_ENGINE_URL=${ML_ENGINE_URL}`);
 console.log(`[backend] CLIENT_ORIGIN=${CLIENT_ORIGIN}`);
 
-// Scope CORS to the Vercel frontend origin (no wildcard, no credentials needed
-// because auth is handled client-side by Supabase).
-app.use(cors({ origin: CLIENT_ORIGIN }));
+// Scope CORS strictly to the frontend origin and localhost.
+app.use(cors({ origin: [CLIENT_ORIGIN, 'http://localhost:3000'] }));
 app.use(express.json());
 
 // ==================================================
@@ -83,11 +82,10 @@ function searchForDemo(dir: string, depth: number): string | null {
 function findDemoDatasetPath(): string | null {
   const candidates = [
     process.env.DEMO_DATASET_PATH,
+    path.join(__dirname, '..', 'data', 'demo_dataset.csv'),
+    path.join(process.cwd(), 'data', 'demo_dataset.csv'),
     path.join(__dirname, '..', '..', 'ml-engine', 'data', 'demo_dataset.csv'),
-    path.join(__dirname, '..', 'ml-engine', 'data', 'demo_dataset.csv'),
-    path.join(process.cwd(), 'ml-engine', 'data', 'demo_dataset.csv'),
     path.join(process.cwd(), '..', 'ml-engine', 'data', 'demo_dataset.csv'),
-    '/opt/render/project/src/ml-engine/data/demo_dataset.csv',
   ].filter(Boolean) as string[];
   for (const c of candidates) {
     if (fs.existsSync(c) && fs.statSync(c).isFile()) return c;
@@ -209,7 +207,7 @@ apiV1.get('/datasets/:id/preview', (req, res) => {
       if (rowCount < rows) results.push(data);
       rowCount++;
     })
-    .on('end', () => res.json({ success: true, preview: results }))
+    .on('end', () => res.json({ success: true, preview: results, filename: dataset.filename, analytics: dataset.analytics }))
     .on('error', () => res.status(500).json({ error: 'Failed to read preview' }));
 });
 
@@ -567,7 +565,7 @@ apiV1.get('/optimization/jobs/:id', (req, res) => {
 // Lightweight endpoint a cron/UptimeRobot can hit to keep the ML engine warm.
 apiV1.get('/warmup', async (req, res) => {
   try {
-    const r = await axios.get(`${ML_ENGINE_URL}/`, { timeout: 5000 });
+    const r = await axios.get(`${ML_ENGINE_URL}/warmup`, { timeout: 5000 });
     res.json({ success: true, mlEngineStatus: r.status });
   } catch (error: any) {
     res.json({ success: false, error: error.message });
@@ -601,24 +599,7 @@ apiV1.post('/parse-goal', async (req, res) => {
     }
 });
 
-// --------------------------------------------------
-// QC Studio (proxied to ML Engine)
-// --------------------------------------------------
-const QC_ENDPOINTS = ['summary', 'control-chart', 'capability', 'acceptance-sampling'];
-
-QC_ENDPOINTS.forEach((endpoint) => {
-  apiV1.post(`/qc/${endpoint}`, async (req, res) => {
-    try {
-      const response = await axios.post(`${ML_ENGINE_URL}/qc/${endpoint}`, req.body);
-      res.json(response.data);
-    } catch (error: any) {
-      res.status(500).json({
-        success: false,
-        error: error.response?.data?.detail || error.message || `QC ${endpoint} failed`,
-      });
-    }
-  });
-});
+// Removed legacy QC routes (now handled by frontend/lib/qc-compute.ts)
 
 app.use('/api/v1', apiV1);
 

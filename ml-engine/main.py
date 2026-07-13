@@ -61,7 +61,7 @@ CLIENT_ORIGIN = os.getenv("CLIENT_ORIGIN", "https://modliq.vercel.app")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[CLIENT_ORIGIN],
+    allow_origins=[CLIENT_ORIGIN.strip(), "http://localhost:3000"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -108,6 +108,13 @@ def home():
 
     return {
         "message": "MODLIQ ML Engine Running"
+    }
+
+@app.get("/warmup")
+def warmup():
+    return {
+        "status": "ok",
+        "service": "modliq-ml-engine"
     }
 
 
@@ -832,14 +839,14 @@ def optimize_yield(request: OptimizeRequest):
         )
 
         features = [
-            f for f in features if f in df.columns
+            f for f in features if f in df.columns and f.lower() != target.lower()
         ]
 
         if not features:
             normalized_features = []
             lower_requested = [f.lower() for f in request.features] if request.features else []
             for col in df.columns:
-                if col.lower() in lower_requested:
+                if col.lower() in lower_requested and col.lower() != target.lower():
                     normalized_features.append(col)
 
             if not normalized_features:
@@ -984,8 +991,12 @@ def optimize_yield(request: OptimizeRequest):
 
         # Start from the best observed row
         best_settings = X.iloc[
-            int(y.argmax())
+            int(y.argmax()) if request.goal_direction == "maximize" else int(y.argmin())
         ].to_dict()
+
+        # Enforce hard bounds on the starting point so it respects constraints
+        for name in feature_names:
+            best_settings[name] = clamp_feature(name, best_settings[name])
 
         best_yield = predict_yield(best_settings)
 

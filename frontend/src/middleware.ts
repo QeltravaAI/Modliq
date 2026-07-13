@@ -10,6 +10,20 @@ export async function middleware(req: NextRequest) {
 
   const consoleRouteMatch = pathname.match(/^\/([^/]+)\/modliq-console/);
   
+  const legacyRoutes = ['/dashboard', '/data-upload', '/goal', '/optimization-progress', '/results', '/studio'];
+  if (legacyRoutes.some(route => pathname.startsWith(route))) {
+    if (session?.user?.id) {
+      const url = req.nextUrl.clone();
+      url.pathname = `/${session.user.id}/modliq-console${pathname}`;
+      return NextResponse.redirect(url);
+    } else {
+      const url = req.nextUrl.clone();
+      url.pathname = '/';
+      url.searchParams.set('login', 'true');
+      return NextResponse.redirect(url);
+    }
+  }
+  
   if (consoleRouteMatch) {
     const routeUserId = consoleRouteMatch[1];
 

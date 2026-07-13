@@ -16,6 +16,7 @@ import {
 import React, { use, useEffect, useState } from 'react';
 import Image from 'next/image';
 import { createClient } from '@/utils/supabase/client';
+import { usePipelineStore } from '@/store/pipelineStore';
 
 export default function ConsoleLayout({
   children,
@@ -41,6 +42,29 @@ export default function ConsoleLayout({
 
     return () => subscription.unsubscribe();
   }, [supabase]);
+
+  const setDataset = usePipelineStore((s) => s.setDataset);
+  const currentDatasetId = usePipelineStore((s) => s.filename);
+
+  useEffect(() => {
+    if (session?.user?.id && !currentDatasetId) {
+      fetch('/api/user/dataset')
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.workspace?.activeDatasetId) {
+            fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/api/v1/datasets/${data.workspace.activeDatasetId}/preview?rows=1`)
+              .then((r) => r.json())
+              .then((previewData) => {
+                if (previewData.success && previewData.analytics) {
+                  setDataset(data.workspace.activeDatasetId, previewData.analytics);
+                }
+              })
+              .catch(console.error);
+          }
+        })
+        .catch(console.error);
+    }
+  }, [session, currentDatasetId, setDataset]);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
