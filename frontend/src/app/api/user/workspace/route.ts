@@ -20,8 +20,13 @@ export async function GET(request: Request) {
       where: { id: userId }
     });
 
+    if (!user && session.user.email) {
+      user = await prisma.user.findUnique({
+        where: { email: session.user.email }
+      });
+    }
+
     if (!user) {
-      // Upsert user if not exists
       user = await prisma.user.create({
         data: {
           id: userId,
@@ -85,15 +90,25 @@ export async function PATCH(request: Request) {
       }
     }
 
-    const user = await prisma.user.upsert({
-      where: { id: userId },
-      update: updateData,
-      create: {
-        id: userId,
-        email: session.user.email,
-        ...updateData
-      }
-    });
+    let user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user && session.user.email) {
+      user = await prisma.user.findUnique({ where: { email: session.user.email } });
+    }
+
+    if (user) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: updateData,
+      });
+    } else {
+      user = await prisma.user.create({
+        data: {
+          id: userId,
+          email: session.user.email,
+          ...updateData
+        }
+      });
+    }
 
     return NextResponse.json({ success: true, user });
   } catch (error) {
