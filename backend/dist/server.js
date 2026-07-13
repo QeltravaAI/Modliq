@@ -42,6 +42,27 @@ const uploadDir = isProduction
     : path_1.default.join(__dirname, '../uploads');
 if (!fs_1.default.existsSync(uploadDir))
     fs_1.default.mkdirSync(uploadDir, { recursive: true });
+function findFileInUploads(filename) {
+    const directPath = path_1.default.join(uploadDir, filename);
+    if (fs_1.default.existsSync(directPath) && fs_1.default.statSync(directPath).isFile()) {
+        return directPath;
+    }
+    try {
+        const entries = fs_1.default.readdirSync(uploadDir, { recursive: true });
+        for (const entry of entries) {
+            if (typeof entry !== 'string')
+                continue;
+            const fullPath = path_1.default.join(uploadDir, entry);
+            if (path_1.default.basename(fullPath) === filename && fs_1.default.statSync(fullPath).isFile()) {
+                return fullPath;
+            }
+        }
+    }
+    catch (err) {
+        console.error('Failed to scan uploads directory:', err);
+    }
+    return null;
+}
 const storage = multer_1.default.diskStorage({
     destination: (req, file, cb) => {
         const userId = req.params.userId || 'default_user';
@@ -241,14 +262,15 @@ apiV1.post('/optimization/run', async (req, res) => {
         else if (filename === 'manufacturing_data.csv' || filename === 'demo_dataset.csv') {
             localPath = path_1.default.join(uploadDir, '..', '..', 'ml-engine', 'data', 'demo_dataset.csv');
         }
-        console.log(`[optimization] filename=${filename}, localPath=${localPath}, datasetFound=${!!dataset}`);
-        const fileStats = fs_1.default.existsSync(localPath) ? fs_1.default.statSync(localPath) : null;
-        if (fileStats && fileStats.isFile()) {
-            fileContent = fs_1.default.readFileSync(localPath).toString('base64');
-            console.log(`[optimization] Loaded ${(fileContent.length / 1024).toFixed(1)} KB from ${localPath}`);
+        const resolvedPath = fs_1.default.existsSync(localPath) && fs_1.default.statSync(localPath).isFile()
+            ? localPath
+            : findFileInUploads(filename);
+        if (resolvedPath) {
+            fileContent = fs_1.default.readFileSync(resolvedPath).toString('base64');
+            console.log(`[optimization] Loaded ${(fileContent.length / 1024).toFixed(1)} KB from ${resolvedPath}`);
         }
         else {
-            console.log(`[optimization] File not found or not a file: ${localPath}`);
+            console.log(`[optimization] File not found: ${filename}`);
         }
         if (!fileContent) {
             return res.status(400).json({

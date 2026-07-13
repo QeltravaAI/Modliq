@@ -42,8 +42,29 @@ const isProduction = process.env.NODE_ENV === 'production';
 const uploadDir = isProduction
   ? path.join('/tmp/modliq', 'uploads')
   : path.join(__dirname, '../uploads');
-
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+function findFileInUploads(filename: string): string | null {
+  const directPath = path.join(uploadDir, filename);
+  if (fs.existsSync(directPath) && fs.statSync(directPath).isFile()) {
+    return directPath;
+  }
+
+  try {
+    const entries = fs.readdirSync(uploadDir, { recursive: true });
+    for (const entry of entries) {
+      if (typeof entry !== 'string') continue;
+      const fullPath = path.join(uploadDir, entry);
+      if (path.basename(fullPath) === filename && fs.statSync(fullPath).isFile()) {
+        return fullPath;
+      }
+    }
+  } catch (err) {
+    console.error('Failed to scan uploads directory:', err);
+  }
+
+  return null;
+}
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -262,14 +283,15 @@ apiV1.post('/optimization/run', async (req, res) => {
       localPath = path.join(uploadDir, '..', '..', 'ml-engine', 'data', 'demo_dataset.csv');
     }
 
-    console.log(`[optimization] filename=${filename}, localPath=${localPath}, datasetFound=${!!dataset}`);
+    const resolvedPath = fs.existsSync(localPath) && fs.statSync(localPath).isFile()
+      ? localPath
+      : findFileInUploads(filename);
 
-    const fileStats = fs.existsSync(localPath) ? fs.statSync(localPath) : null;
-    if (fileStats && fileStats.isFile()) {
-      fileContent = fs.readFileSync(localPath).toString('base64');
-      console.log(`[optimization] Loaded ${(fileContent.length / 1024).toFixed(1)} KB from ${localPath}`);
+    if (resolvedPath) {
+      fileContent = fs.readFileSync(resolvedPath).toString('base64');
+      console.log(`[optimization] Loaded ${(fileContent.length / 1024).toFixed(1)} KB from ${resolvedPath}`);
     } else {
-      console.log(`[optimization] File not found or not a file: ${localPath}`);
+      console.log(`[optimization] File not found: ${filename}`);
     }
 
     if (!fileContent) {
