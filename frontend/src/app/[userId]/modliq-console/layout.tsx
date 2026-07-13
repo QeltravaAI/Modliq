@@ -27,9 +27,9 @@ export default function ConsoleLayout({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const resolvedParams = use(params);
   const [session, setSession] = useState<any>(null);
   const supabase = createClient();
+  const resolvedParams = use(params);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {

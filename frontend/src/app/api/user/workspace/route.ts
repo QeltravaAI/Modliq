@@ -33,11 +33,11 @@ export async function GET(request: Request) {
     return NextResponse.json({
       activeDatasetId: user.activeDatasetId,
       activeDatasetFilename: user.activeDatasetFilename,
-      datasetAnalytics: user.datasetAnalytics,
-      datasetPreview: user.datasetPreview,
-      parsedIntent: user.parsedIntent,
+      datasetAnalytics: user.datasetAnalytics ? JSON.parse(user.datasetAnalytics) : null,
+      datasetPreview: user.datasetPreview ? JSON.parse(user.datasetPreview) : null,
+      parsedIntent: user.parsedIntent ? JSON.parse(user.parsedIntent) : null,
       activeOptimizationJobId: user.activeOptimizationJobId,
-      latestOptimizationResult: user.latestOptimizationResult,
+      latestOptimizationResult: user.latestOptimizationResult ? JSON.parse(user.latestOptimizationResult) : null,
     });
   } catch (error) {
     console.error('Error fetching workspace:', error);
@@ -73,9 +73,15 @@ export async function PATCH(request: Request) {
       'latestOptimizationResult'
     ];
 
+    const jsonFields = ['datasetAnalytics', 'datasetPreview', 'parsedIntent', 'latestOptimizationResult'];
+
     for (const field of allowedFields) {
       if (body[field] !== undefined) {
-        updateData[field] = body[field];
+        if (jsonFields.includes(field)) {
+          updateData[field] = JSON.stringify(body[field]);
+        } else {
+          updateData[field] = body[field];
+        }
       }
     }
 
