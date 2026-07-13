@@ -36,7 +36,10 @@ app.get('/health', (req, res) => {
 // ==================================================
 // STORAGE + HELPERS
 // ==================================================
-const uploadDir = path_1.default.join(__dirname, '../uploads');
+const isProduction = process.env.NODE_ENV === 'production';
+const uploadDir = isProduction
+    ? path_1.default.join('/tmp/modliq', 'uploads')
+    : path_1.default.join(__dirname, '../uploads');
 if (!fs_1.default.existsSync(uploadDir))
     fs_1.default.mkdirSync(uploadDir, { recursive: true });
 const storage = multer_1.default.diskStorage({

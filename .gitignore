@@ -28,6 +28,9 @@ uploads/
 # Keep the tracked demo dataset (served by the frontend)
 !frontend/public/manufacturing_data.csv
 
+# Keep the tracked ML engine demo dataset
+!ml-engine/data/demo_dataset.csv
+
 # =====================================
 # Logs
 # =====================================

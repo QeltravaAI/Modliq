@@ -1,10 +1,23 @@
 import fs from 'fs';
 import path from 'path';
 
-const STORE_PATH = path.join(process.cwd(), 'uploads', 'dataset-store.json');
+const isProduction = process.env.NODE_ENV === 'production';
+const STORE_DIR = isProduction ? '/tmp/modliq' : path.join(process.cwd(), 'uploads');
+const STORE_PATH = path.join(STORE_DIR, 'dataset-store.json');
+
+function ensureDir() {
+  try {
+    if (!fs.existsSync(STORE_DIR)) {
+      fs.mkdirSync(STORE_DIR, { recursive: true });
+    }
+  } catch (err) {
+    console.error('Failed to create dataset store directory:', err);
+  }
+}
 
 function loadStore() {
   try {
+    ensureDir();
     if (fs.existsSync(STORE_PATH)) {
       const raw = fs.readFileSync(STORE_PATH, 'utf-8');
       return JSON.parse(raw);
@@ -17,8 +30,7 @@ function loadStore() {
 
 function saveStore() {
   try {
-    const dir = path.dirname(STORE_PATH);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    ensureDir();
     fs.writeFileSync(STORE_PATH, JSON.stringify(datasets, null, 2));
   } catch (err) {
     console.error('Failed to persist dataset store:', err);

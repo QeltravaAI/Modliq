@@ -6,9 +6,22 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.datasetStore = void 0;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
-const STORE_PATH = path_1.default.join(process.cwd(), 'uploads', 'dataset-store.json');
+const isProduction = process.env.NODE_ENV === 'production';
+const STORE_DIR = isProduction ? '/tmp/modliq' : path_1.default.join(process.cwd(), 'uploads');
+const STORE_PATH = path_1.default.join(STORE_DIR, 'dataset-store.json');
+function ensureDir() {
+    try {
+        if (!fs_1.default.existsSync(STORE_DIR)) {
+            fs_1.default.mkdirSync(STORE_DIR, { recursive: true });
+        }
+    }
+    catch (err) {
+        console.error('Failed to create dataset store directory:', err);
+    }
+}
 function loadStore() {
     try {
+        ensureDir();
         if (fs_1.default.existsSync(STORE_PATH)) {
             const raw = fs_1.default.readFileSync(STORE_PATH, 'utf-8');
             return JSON.parse(raw);
@@ -21,9 +34,7 @@ function loadStore() {
 }
 function saveStore() {
     try {
-        const dir = path_1.default.dirname(STORE_PATH);
-        if (!fs_1.default.existsSync(dir))
-            fs_1.default.mkdirSync(dir, { recursive: true });
+        ensureDir();
         fs_1.default.writeFileSync(STORE_PATH, JSON.stringify(datasets, null, 2));
     }
     catch (err) {
