@@ -57,9 +57,10 @@ interface PipelineStore {
   intent: IntentState | null;
   optimizationId: string | null;
   result: OptimizationResult | null;
-  setDataset: (filename: string, analytics: any) => void;
-  setIntent: (intent: IntentState) => void;
-  setOptimization: (id: string, result: OptimizationResult) => void;
+  setDataset: (filename: string, analytics: any, skipSync?: boolean) => void;
+  setIntent: (intent: IntentState, skipSync?: boolean) => void;
+  setOptimization: (id: string, result: OptimizationResult, skipSync?: boolean) => void;
+  hydrateWorkspace: (data: any) => void;
   reset: () => void;
 }
 
@@ -71,10 +72,45 @@ export const usePipelineStore = create<PipelineStore>((set) => ({
   intent: null,
   optimizationId: null,
   result: null,
-  setDataset: (filename, analytics) => set({ filename, analytics }),
-  setIntent: (intent) => set({ intent }),
-  setOptimization: (optimizationId, result) =>
-    set({ optimizationId, result }),
+  setDataset: (filename, analytics, skipSync = false) => {
+    set({ filename, analytics });
+    if (!skipSync) {
+      fetch('/api/user/workspace', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ activeDatasetId: filename, datasetAnalytics: analytics }),
+      }).catch(console.error);
+    }
+  },
+  setIntent: (intent, skipSync = false) => {
+    set({ intent });
+    if (!skipSync) {
+      fetch('/api/user/workspace', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parsedIntent: intent }),
+      }).catch(console.error);
+    }
+  },
+  setOptimization: (optimizationId, result, skipSync = false) => {
+    set({ optimizationId, result });
+    if (!skipSync) {
+      fetch('/api/user/workspace', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ activeOptimizationJobId: optimizationId, latestOptimizationResult: result }),
+      }).catch(console.error);
+    }
+  },
+  hydrateWorkspace: (data) => {
+    set({
+      filename: data.activeDatasetId || null,
+      analytics: data.datasetAnalytics || null,
+      intent: data.parsedIntent || null,
+      optimizationId: data.activeOptimizationJobId || null,
+      result: data.latestOptimizationResult || null,
+    });
+  },
   reset: () =>
     set({
       filename: null,

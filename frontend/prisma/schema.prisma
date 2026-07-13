@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -17,7 +17,14 @@ model User {
   accounts      Account[]
   sessions      Session[]
   isDemo        Boolean   @default(false)
-  activeDatasetId String?
+  activeDatasetId          String?
+  activeDatasetFilename    String?
+  datasetAnalytics         Json?
+  datasetPreview           Json?
+  parsedIntent             Json?
+  activeOptimizationJobId  String?
+  latestOptimizationResult Json?
+  updatedAt                DateTime @updatedAt @default(now())
 }
 
 model Account {
