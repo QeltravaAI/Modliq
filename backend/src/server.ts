@@ -17,10 +17,14 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3001;
 const ML_ENGINE_URL = process.env.ML_ENGINE_URL || 'http://127.0.0.1:8000';
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'https://modliq.vercel.app';
 
 console.log(`[backend] ML_ENGINE_URL=${ML_ENGINE_URL}`);
+console.log(`[backend] CLIENT_ORIGIN=${CLIENT_ORIGIN}`);
 
-app.use(cors());
+// Scope CORS to the Vercel frontend origin (no wildcard, no credentials needed
+// because auth is handled client-side by Supabase).
+app.use(cors({ origin: CLIENT_ORIGIN }));
 app.use(express.json());
 
 // ==================================================
@@ -43,6 +47,87 @@ const uploadDir = isProduction
   ? path.join('/tmp/modliq', 'uploads')
   : path.join(__dirname, '../uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+// Resolve the demo dataset CSV across possible deploy layouts. Render's working
+// directory varies (monorepo checkout vs standalone service), so we probe several
+// candidate locations and fall back to a bounded recursive search. This fixes the
+// production bug where `process.cwd()/../ml-engine/...` resolved to a non-existent
+// /tmp/ml-engine path.
+function searchForDemo(dir: string, depth: number): string | null {
+  if (depth < 0) return null;
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const e of entries) {
+    if (e.isFile() && e.name === 'demo_dataset.csv') return path.join(dir, e.name);
+  }
+  if (depth === 0) return null;
+  for (const e of entries) {
+    if (
+      e.isDirectory() &&
+      e.name !== 'node_modules' &&
+      e.name !== '.git' &&
+      e.name !== 'venv' &&
+      e.name !== '.next'
+    ) {
+      const found = searchForDemo(path.join(dir, e.name), depth - 1);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function findDemoDatasetPath(): string | null {
+  const candidates = [
+    process.env.DEMO_DATASET_PATH,
+    path.join(__dirname, '..', '..', 'ml-engine', 'data', 'demo_dataset.csv'),
+    path.join(__dirname, '..', 'ml-engine', 'data', 'demo_dataset.csv'),
+    path.join(process.cwd(), 'ml-engine', 'data', 'demo_dataset.csv'),
+    path.join(process.cwd(), '..', 'ml-engine', 'data', 'demo_dataset.csv'),
+    '/opt/render/project/src/ml-engine/data/demo_dataset.csv',
+  ].filter(Boolean) as string[];
+  for (const c of candidates) {
+    if (fs.existsSync(c) && fs.statSync(c).isFile()) return c;
+  }
+  return searchForDemo(process.cwd(), 5);
+}
+
+function computeAnalyticsStatic(rows: any[]) {
+  const totalRows = rows.length;
+  if (totalRows === 0) {
+    return { totalRows: 0, totalColumns: 0, missingValues: 0, numericColumns: [], categoricalColumns: [] };
+  }
+  const headers = Object.keys(rows[0]);
+  const columnTypes: Record<string, string> = {};
+  let missingValues = 0;
+  for (const col of headers) {
+    let isNumeric = false;
+    for (const row of rows) {
+      const v = row[col];
+      if (v === null || v === undefined || v === '') {
+        missingValues++;
+        continue;
+      }
+      if (!isNaN(Number(v))) {
+        isNumeric = true;
+        break;
+      }
+    }
+    columnTypes[col] = isNumeric ? 'numeric' : 'categorical';
+  }
+  const numericColumns = Object.keys(columnTypes).filter((c) => columnTypes[c] === 'numeric');
+  const categoricalColumns = Object.keys(columnTypes).filter((c) => columnTypes[c] === 'categorical');
+  return {
+    totalRows,
+    totalColumns: headers.length,
+    missingValues,
+    numericColumns,
+    categoricalColumns,
+  };
+}
 
 function findFileInUploads(filename: string): string | null {
   const directPath = path.join(uploadDir, filename);
@@ -128,19 +213,30 @@ apiV1.get('/datasets/:id/preview', (req, res) => {
     .on('error', () => res.status(500).json({ error: 'Failed to read preview' }));
 });
 
-apiV1.post('/datasets/demo/:userId', (req, res) => {
+apiV1.post('/datasets/demo/:userId', async (req, res) => {
   const userId = req.params.userId;
-  const demoFile = path.join(uploadDir, '..', '..', 'ml-engine', 'data', 'demo_dataset.csv');
+  const demoFile = findDemoDatasetPath();
+  if (!demoFile) {
+    return res.status(500).json({ success: false, error: 'Demo dataset is not available on the server.' });
+  }
 
+  const results: any[] = [];
+  try {
+    await new Promise<void>((resolve, reject) => {
+      fs.createReadStream(demoFile)
+        .pipe(csv())
+        .on('data', (data) => {
+          if (results.length < 500) results.push(data);
+        })
+        .on('end', () => resolve())
+        .on('error', reject);
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: 'Failed to read demo dataset.' });
+  }
+
+  const analytics = computeAnalyticsStatic(results);
   const datasetId = `ds_demo_${Date.now()}`;
-
-  const analytics = {
-    totalRows: 40,
-    totalColumns: 5,
-    missingValues: 0,
-    numericColumns: ['yield', 'temperature', 'pressure', 'flow_rate'],
-    categoricalColumns: ['batch_id'],
-  };
 
   datasetStore.saveDataset(datasetId, {
     id: datasetId,
@@ -156,6 +252,7 @@ apiV1.post('/datasets/demo/:userId', (req, res) => {
     success: true,
     datasetId,
     filename: 'manufacturing_data.csv',
+    preview: results,
     analytics,
   });
 });
@@ -281,7 +378,8 @@ apiV1.post('/optimization/run', async (req, res) => {
     if (dataset) {
       localPath = dataset.filePath;
     } else if (filename === 'manufacturing_data.csv' || filename === 'demo_dataset.csv') {
-      localPath = path.join(uploadDir, '..', '..', 'ml-engine', 'data', 'demo_dataset.csv');
+      const dp = findDemoDatasetPath();
+      if (dp) localPath = dp;
     }
 
     const resolvedPath = fs.existsSync(localPath) && fs.statSync(localPath).isFile()
@@ -354,6 +452,125 @@ apiV1.post('/optimization/run', async (req, res) => {
       error: message,
       details: error.response?.data || null,
     });
+  }
+});
+
+// ==================================================
+// Optimization — ASYNC JOB PATTERN
+// The ML engine can take 20-60s+ (and >30s on a cold start). We never block the
+// HTTP response on that work: we create a job, run the ML call in the background
+// (with a generous/no timeout), and the client polls /optimization/jobs/:id.
+// ==================================================
+interface OptJob {
+  id: string;
+  status: 'running' | 'completed' | 'failed';
+  result?: any;
+  error?: string;
+  createdAt: number;
+}
+const optimizationJobs = new Map<string, OptJob>();
+
+function resolveOptimizationFile(filename: string): { localPath: string; dataset: any } | null {
+  let localPath = path.join(uploadDir, filename);
+  const dataset = datasetStore.getDataset(filename);
+  if (dataset) {
+    localPath = dataset.filePath;
+  } else if (filename === 'manufacturing_data.csv' || filename === 'demo_dataset.csv') {
+    const dp = findDemoDatasetPath();
+    if (dp) localPath = dp;
+  }
+  const resolvedPath =
+    fs.existsSync(localPath) && fs.statSync(localPath).isFile()
+      ? localPath
+      : findFileInUploads(filename);
+  if (!resolvedPath) return null;
+  return { localPath: resolvedPath, dataset };
+}
+
+apiV1.post('/optimization/jobs', async (req, res) => {
+  try {
+    const { filename, template_id, intent, monthly_volume, unit_value } = req.body;
+    if (!filename) {
+      return res.status(400).json({ success: false, error: 'filename is required' });
+    }
+
+    const resolved = resolveOptimizationFile(filename);
+    if (!resolved) {
+      return res.status(400).json({
+        success: false,
+        error: `Dataset file not found on server: ${filename}. Upload a fresh dataset or load the demo.`,
+      });
+    }
+
+    const fileContent = fs.readFileSync(resolved.localPath).toString('base64');
+
+    const payload = {
+      filename: resolved.dataset ? resolved.dataset.filename : filename,
+      file_content: fileContent,
+      template_id: template_id || 'yield_optimizer',
+      target: intent?.target,
+      features: intent?.features?.length ? intent.features : undefined,
+      goal_direction: intent?.goal_direction || 'maximize',
+      threshold: intent?.threshold,
+      constraints: intent?.constraints,
+      monthly_volume: monthly_volume || undefined,
+      unit_value: unit_value || undefined,
+    };
+
+    const jobId = `job_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const job: OptJob = { id: jobId, status: 'running', createdAt: Date.now() };
+    optimizationJobs.set(jobId, job);
+
+    // Generous timeout so cold-start ML engine calls are not truncated.
+    const jobTimeout = parseInt(process.env.JOB_TIMEOUT_MS || '180000', 10);
+
+    (async () => {
+      try {
+        const response = await axios.post(`${ML_ENGINE_URL}/optimize-yield`, payload, {
+          timeout: jobTimeout,
+        });
+        const result = response.data;
+        if (result && result.success) {
+          optimizationData.save(jobId, {
+            id: jobId,
+            filename: payload.filename,
+            template_id: payload.template_id,
+            result,
+          });
+          job.result = result;
+          job.status = 'completed';
+        } else {
+          job.status = 'failed';
+          job.error = result?.error || 'Optimization failed';
+        }
+      } catch (error: any) {
+        job.status = 'failed';
+        job.error =
+          error.response?.data?.error || error.message || 'Optimization failed';
+      }
+    })();
+
+    res.json({ success: true, jobId, status: 'running' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to start optimization' });
+  }
+});
+
+apiV1.get('/optimization/jobs/:id', (req, res) => {
+  const job = optimizationJobs.get(req.params.id);
+  if (!job) {
+    return res.status(404).json({ success: false, error: 'Optimization job not found' });
+  }
+  res.json({ success: true, id: job.id, status: job.status, result: job.result, error: job.error });
+});
+
+// Lightweight endpoint a cron/UptimeRobot can hit to keep the ML engine warm.
+apiV1.get('/warmup', async (req, res) => {
+  try {
+    const r = await axios.get(`${ML_ENGINE_URL}/`, { timeout: 5000 });
+    res.json({ success: true, mlEngineStatus: r.status });
+  } catch (error: any) {
+    res.json({ success: false, error: error.message });
   }
 });
 

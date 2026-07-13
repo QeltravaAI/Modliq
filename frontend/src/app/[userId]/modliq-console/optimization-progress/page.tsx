@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, use } from 'react';
+import React, { useState, useEffect, useCallback, use, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Activity, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 import { usePipelineStore } from '@/store/pipelineStore';
-import { runOptimization } from '@/services/optimization.service';
+import { createOptimizationJob, getOptimizationJob } from '@/services/optimization.service';
 
 type Stage = 'idle' | 'parsing_goal' | 'training_model' | 'searching_configurations' | 'done' | 'error';
 
@@ -17,6 +17,8 @@ const STAGE_LABELS: Record<Stage, string> = {
   error: 'Error',
 };
 
+const STAGES: Stage[] = ['parsing_goal', 'training_model', 'searching_configurations', 'done'];
+
 export default function OptimizationProgressPage({ params }: { params: Promise<{ userId: string }> }) {
   const resolvedParams = use(params);
   const router = useRouter();
@@ -24,31 +26,26 @@ export default function OptimizationProgressPage({ params }: { params: Promise<{
   const [stage, setStage] = useState<Stage>('idle');
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
 
   const startOptimization = useCallback(async () => {
     if (!intent || !filename) return;
     setStage('parsing_goal');
-    setProgress(0);
+    setProgress(10);
     setError(null);
 
-    const timers: NodeJS.Timeout[] = [];
+    let jobId: string | null = null;
 
     try {
-      timers.push(
-        setTimeout(() => {
-          setStage('training_model');
-          setProgress(30);
-        }, 1500)
-      );
-
-      timers.push(
-        setTimeout(() => {
-          setStage('searching_configurations');
-          setProgress(60);
-        }, 3000)
-      );
-
-      const result = await runOptimization({
+      // 1) Create the job (returns immediately).
+      const created = await createOptimizationJob({
         filename,
         template_id: intent.template_id,
         intent: {
@@ -60,25 +57,56 @@ export default function OptimizationProgressPage({ params }: { params: Promise<{
         },
       });
 
-      clearTimeout(timers[0]);
-      clearTimeout(timers[1]);
-
-      if (result.success && result.id && result.result && result.result.metrics) {
-        setStage('done');
-        setProgress(100);
-        setOptimization(result.id, result.result);
-
-        setTimeout(() => {
-          router.push(`/${resolvedParams.userId}/modliq-console/results`);
-        }, 800);
-      } else {
-        const errorMsg = result.result?.error || 'Optimization returned unsuccessful result';
-        throw new Error(errorMsg);
+      if (!created.success || !created.jobId) {
+        throw new Error(created.error || 'Failed to start optimization');
       }
+      jobId = created.jobId;
+
+      // 2) Poll for status. The ML engine can take 20-60s+ (and >30s cold).
+      let pollTicks = 0;
+      pollRef.current = setInterval(async () => {
+        try {
+          const job = await getOptimizationJob(jobId!);
+          pollTicks += 1;
+
+          // Advance the visible staging while the job runs.
+          if (job.status === 'running') {
+            if (pollTicks === 1) {
+              setStage('training_model');
+              setProgress(35);
+            } else if (pollTicks === 3) {
+              setStage('searching_configurations');
+              setProgress(65);
+            } else {
+              setProgress((p) => Math.min(90, p + 5));
+            }
+          } else if (job.status === 'completed') {
+            stopPolling();
+            if (job.result && job.result.metrics) {
+              setStage('done');
+              setProgress(100);
+              setOptimization(jobId!, job.result);
+              setTimeout(() => {
+                router.push(`/${resolvedParams.userId}/modliq-console/results`);
+              }, 800);
+            } else {
+              const msg = job.result?.error || 'Optimization returned no result';
+              throw new Error(msg);
+            }
+          } else if (job.status === 'failed') {
+            stopPolling();
+            throw new Error(job.error || 'Optimization failed');
+          }
+        } catch (err: any) {
+          stopPolling();
+          setStage('error');
+          setError(err.message || 'Optimization failed');
+        }
+      }, 2500);
     } catch (err: any) {
+      stopPolling();
       setStage('error');
       setError(err.message || 'Optimization failed');
-      timers.forEach(clearTimeout);
     }
   }, [intent, filename, setOptimization, router]);
 
@@ -86,6 +114,7 @@ export default function OptimizationProgressPage({ params }: { params: Promise<{
     if (intent && filename && stage === 'idle') {
       startOptimization();
     }
+    return () => stopPolling();
   }, [intent, filename, stage, startOptimization]);
 
   if (!intent || !filename) {
@@ -104,8 +133,7 @@ export default function OptimizationProgressPage({ params }: { params: Promise<{
     );
   }
 
-  const stages: Stage[] = ['parsing_goal', 'training_model', 'searching_configurations', 'done'];
-  const currentIndex = stages.indexOf(stage);
+  const currentIndex = STAGES.indexOf(stage);
 
   return (
     <div className="p-8 max-w-5xl mx-auto h-full flex flex-col">
@@ -152,7 +180,7 @@ export default function OptimizationProgressPage({ params }: { params: Promise<{
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {stages.slice(0, 3).map((s, idx) => {
+              {STAGES.slice(0, 3).map((s, idx) => {
                 const isActive = idx === currentIndex;
                 const isComplete = idx < currentIndex;
                 return (

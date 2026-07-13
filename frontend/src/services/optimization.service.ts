@@ -22,6 +22,23 @@ export const runOptimization = async (payload: {
   return response.data;
 };
 
+// Async job pattern: start a job (returns immediately) and poll for status.
+export const createOptimizationJob = async (payload: {
+  filename: string;
+  template_id?: string;
+  intent: any;
+  monthly_volume?: number;
+  unit_value?: number;
+}) => {
+  const response = await axios.post(`${API_URL}/api/v1/optimization/jobs`, payload);
+  return response.data;
+};
+
+export const getOptimizationJob = async (jobId: string) => {
+  const response = await axios.get(`${API_URL}/api/v1/optimization/jobs/${jobId}`);
+  return response.data;
+};
+
 export const getOptimizationResults = async (id: string) => {
   const response = await axios.get(`${API_URL}/api/v1/optimization/${id}/results`);
   return response.data;

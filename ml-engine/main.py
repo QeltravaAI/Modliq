@@ -58,10 +58,12 @@ app = FastAPI(title="Modliq ML Engine", version="1.0.0")
 # ==================================================
 # CORS
 # ==================================================
+CLIENT_ORIGIN = os.getenv("CLIENT_ORIGIN", "https://modliq.vercel.app")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=[CLIENT_ORIGIN],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

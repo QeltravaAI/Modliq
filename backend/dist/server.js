@@ -20,8 +20,12 @@ dotenv_1.default.config();
 const app = (0, express_1.default)();
 const port = process.env.PORT || 3001;
 const ML_ENGINE_URL = process.env.ML_ENGINE_URL || 'http://127.0.0.1:8000';
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'https://modliq.vercel.app';
 console.log(`[backend] ML_ENGINE_URL=${ML_ENGINE_URL}`);
-app.use((0, cors_1.default)());
+console.log(`[backend] CLIENT_ORIGIN=${CLIENT_ORIGIN}`);
+// Scope CORS to the Vercel frontend origin (no wildcard, no credentials needed
+// because auth is handled client-side by Supabase).
+app.use((0, cors_1.default)({ origin: CLIENT_ORIGIN }));
 app.use(express_1.default.json());
 // ==================================================
 // DATASETS (typed routes)
@@ -42,6 +46,88 @@ const uploadDir = isProduction
     : path_1.default.join(__dirname, '../uploads');
 if (!fs_1.default.existsSync(uploadDir))
     fs_1.default.mkdirSync(uploadDir, { recursive: true });
+// Resolve the demo dataset CSV across possible deploy layouts. Render's working
+// directory varies (monorepo checkout vs standalone service), so we probe several
+// candidate locations and fall back to a bounded recursive search. This fixes the
+// production bug where `process.cwd()/../ml-engine/...` resolved to a non-existent
+// /tmp/ml-engine path.
+function searchForDemo(dir, depth) {
+    if (depth < 0)
+        return null;
+    let entries;
+    try {
+        entries = fs_1.default.readdirSync(dir, { withFileTypes: true });
+    }
+    catch {
+        return null;
+    }
+    for (const e of entries) {
+        if (e.isFile() && e.name === 'demo_dataset.csv')
+            return path_1.default.join(dir, e.name);
+    }
+    if (depth === 0)
+        return null;
+    for (const e of entries) {
+        if (e.isDirectory() &&
+            e.name !== 'node_modules' &&
+            e.name !== '.git' &&
+            e.name !== 'venv' &&
+            e.name !== '.next') {
+            const found = searchForDemo(path_1.default.join(dir, e.name), depth - 1);
+            if (found)
+                return found;
+        }
+    }
+    return null;
+}
+function findDemoDatasetPath() {
+    const candidates = [
+        process.env.DEMO_DATASET_PATH,
+        path_1.default.join(__dirname, '..', '..', 'ml-engine', 'data', 'demo_dataset.csv'),
+        path_1.default.join(__dirname, '..', 'ml-engine', 'data', 'demo_dataset.csv'),
+        path_1.default.join(process.cwd(), 'ml-engine', 'data', 'demo_dataset.csv'),
+        path_1.default.join(process.cwd(), '..', 'ml-engine', 'data', 'demo_dataset.csv'),
+        '/opt/render/project/src/ml-engine/data/demo_dataset.csv',
+    ].filter(Boolean);
+    for (const c of candidates) {
+        if (fs_1.default.existsSync(c) && fs_1.default.statSync(c).isFile())
+            return c;
+    }
+    return searchForDemo(process.cwd(), 5);
+}
+function computeAnalyticsStatic(rows) {
+    const totalRows = rows.length;
+    if (totalRows === 0) {
+        return { totalRows: 0, totalColumns: 0, missingValues: 0, numericColumns: [], categoricalColumns: [] };
+    }
+    const headers = Object.keys(rows[0]);
+    const columnTypes = {};
+    let missingValues = 0;
+    for (const col of headers) {
+        let isNumeric = false;
+        for (const row of rows) {
+            const v = row[col];
+            if (v === null || v === undefined || v === '') {
+                missingValues++;
+                continue;
+            }
+            if (!isNaN(Number(v))) {
+                isNumeric = true;
+                break;
+            }
+        }
+        columnTypes[col] = isNumeric ? 'numeric' : 'categorical';
+    }
+    const numericColumns = Object.keys(columnTypes).filter((c) => columnTypes[c] === 'numeric');
+    const categoricalColumns = Object.keys(columnTypes).filter((c) => columnTypes[c] === 'categorical');
+    return {
+        totalRows,
+        totalColumns: headers.length,
+        missingValues,
+        numericColumns,
+        categoricalColumns,
+    };
+}
 function findFileInUploads(filename) {
     const directPath = path_1.default.join(uploadDir, filename);
     if (fs_1.default.existsSync(directPath) && fs_1.default.statSync(directPath).isFile()) {
@@ -121,17 +207,30 @@ apiV1.get('/datasets/:id/preview', (req, res) => {
         .on('end', () => res.json({ success: true, preview: results }))
         .on('error', () => res.status(500).json({ error: 'Failed to read preview' }));
 });
-apiV1.post('/datasets/demo/:userId', (req, res) => {
+apiV1.post('/datasets/demo/:userId', async (req, res) => {
     const userId = req.params.userId;
-    const demoFile = path_1.default.join(uploadDir, '..', '..', 'ml-engine', 'data', 'demo_dataset.csv');
+    const demoFile = findDemoDatasetPath();
+    if (!demoFile) {
+        return res.status(500).json({ success: false, error: 'Demo dataset is not available on the server.' });
+    }
+    const results = [];
+    try {
+        await new Promise((resolve, reject) => {
+            fs_1.default.createReadStream(demoFile)
+                .pipe((0, csv_parser_1.default)())
+                .on('data', (data) => {
+                if (results.length < 500)
+                    results.push(data);
+            })
+                .on('end', () => resolve())
+                .on('error', reject);
+        });
+    }
+    catch (err) {
+        return res.status(500).json({ success: false, error: 'Failed to read demo dataset.' });
+    }
+    const analytics = computeAnalyticsStatic(results);
     const datasetId = `ds_demo_${Date.now()}`;
-    const analytics = {
-        totalRows: 40,
-        totalColumns: 5,
-        missingValues: 0,
-        numericColumns: ['yield', 'temperature', 'pressure', 'flow_rate'],
-        categoricalColumns: ['batch_id'],
-    };
     datasetStore_1.datasetStore.saveDataset(datasetId, {
         id: datasetId,
         filename: 'manufacturing_data.csv',
@@ -144,6 +243,7 @@ apiV1.post('/datasets/demo/:userId', (req, res) => {
         success: true,
         datasetId,
         filename: 'manufacturing_data.csv',
+        preview: results,
         analytics,
     });
 });
@@ -261,7 +361,9 @@ apiV1.post('/optimization/run', async (req, res) => {
             localPath = dataset.filePath;
         }
         else if (filename === 'manufacturing_data.csv' || filename === 'demo_dataset.csv') {
-            localPath = path_1.default.join(uploadDir, '..', '..', 'ml-engine', 'data', 'demo_dataset.csv');
+            const dp = findDemoDatasetPath();
+            if (dp)
+                localPath = dp;
         }
         const resolvedPath = fs_1.default.existsSync(localPath) && fs_1.default.statSync(localPath).isFile()
             ? localPath
@@ -323,6 +425,106 @@ apiV1.post('/optimization/run', async (req, res) => {
             error: message,
             details: error.response?.data || null,
         });
+    }
+});
+const optimizationJobs = new Map();
+function resolveOptimizationFile(filename) {
+    let localPath = path_1.default.join(uploadDir, filename);
+    const dataset = datasetStore_1.datasetStore.getDataset(filename);
+    if (dataset) {
+        localPath = dataset.filePath;
+    }
+    else if (filename === 'manufacturing_data.csv' || filename === 'demo_dataset.csv') {
+        const dp = findDemoDatasetPath();
+        if (dp)
+            localPath = dp;
+    }
+    const resolvedPath = fs_1.default.existsSync(localPath) && fs_1.default.statSync(localPath).isFile()
+        ? localPath
+        : findFileInUploads(filename);
+    if (!resolvedPath)
+        return null;
+    return { localPath: resolvedPath, dataset };
+}
+apiV1.post('/optimization/jobs', async (req, res) => {
+    try {
+        const { filename, template_id, intent, monthly_volume, unit_value } = req.body;
+        if (!filename) {
+            return res.status(400).json({ success: false, error: 'filename is required' });
+        }
+        const resolved = resolveOptimizationFile(filename);
+        if (!resolved) {
+            return res.status(400).json({
+                success: false,
+                error: `Dataset file not found on server: ${filename}. Upload a fresh dataset or load the demo.`,
+            });
+        }
+        const fileContent = fs_1.default.readFileSync(resolved.localPath).toString('base64');
+        const payload = {
+            filename: resolved.dataset ? resolved.dataset.filename : filename,
+            file_content: fileContent,
+            template_id: template_id || 'yield_optimizer',
+            target: intent?.target,
+            features: intent?.features?.length ? intent.features : undefined,
+            goal_direction: intent?.goal_direction || 'maximize',
+            threshold: intent?.threshold,
+            constraints: intent?.constraints,
+            monthly_volume: monthly_volume || undefined,
+            unit_value: unit_value || undefined,
+        };
+        const jobId = `job_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+        const job = { id: jobId, status: 'running', createdAt: Date.now() };
+        optimizationJobs.set(jobId, job);
+        // Generous timeout so cold-start ML engine calls are not truncated.
+        const jobTimeout = parseInt(process.env.JOB_TIMEOUT_MS || '180000', 10);
+        (async () => {
+            try {
+                const response = await axios_1.default.post(`${ML_ENGINE_URL}/optimize-yield`, payload, {
+                    timeout: jobTimeout,
+                });
+                const result = response.data;
+                if (result && result.success) {
+                    optimizationStore_1.optimizationData.save(jobId, {
+                        id: jobId,
+                        filename: payload.filename,
+                        template_id: payload.template_id,
+                        result,
+                    });
+                    job.result = result;
+                    job.status = 'completed';
+                }
+                else {
+                    job.status = 'failed';
+                    job.error = result?.error || 'Optimization failed';
+                }
+            }
+            catch (error) {
+                job.status = 'failed';
+                job.error =
+                    error.response?.data?.error || error.message || 'Optimization failed';
+            }
+        })();
+        res.json({ success: true, jobId, status: 'running' });
+    }
+    catch (error) {
+        res.status(500).json({ success: false, error: error.message || 'Failed to start optimization' });
+    }
+});
+apiV1.get('/optimization/jobs/:id', (req, res) => {
+    const job = optimizationJobs.get(req.params.id);
+    if (!job) {
+        return res.status(404).json({ success: false, error: 'Optimization job not found' });
+    }
+    res.json({ success: true, id: job.id, status: job.status, result: job.result, error: job.error });
+});
+// Lightweight endpoint a cron/UptimeRobot can hit to keep the ML engine warm.
+apiV1.get('/warmup', async (req, res) => {
+    try {
+        const r = await axios_1.default.get(`${ML_ENGINE_URL}/`, { timeout: 5000 });
+        res.json({ success: true, mlEngineStatus: r.status });
+    }
+    catch (error) {
+        res.json({ success: false, error: error.message });
     }
 });
 apiV1.get('/optimization/:id/results', (req, res) => {
