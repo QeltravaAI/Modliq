@@ -248,6 +248,7 @@ apiV1.post('/datasets/upload/:userId', upload.single('dataset'), async (req, res
 // Optimization
 // --------------------------------------------------
 apiV1.post('/optimization/run', async (req, res) => {
+    console.log('[optimization] Request body:', JSON.stringify(req.body).slice(0, 500));
     try {
         const { filename, template_id, intent, monthly_volume, unit_value } = req.body;
         if (!filename) {
@@ -290,14 +291,17 @@ apiV1.post('/optimization/run', async (req, res) => {
             monthly_volume: monthly_volume || undefined,
             unit_value: unit_value || undefined,
         };
+        console.log(`[optimization] Sending to ${ML_ENGINE_URL}/optimize-yield, template=${payload.template_id}, target=${payload.target}`);
         const response = await axios_1.default.post(`${ML_ENGINE_URL}/optimize-yield`, payload, {
             timeout: parseInt(process.env.REQUEST_TIMEOUT_MS || '30000', 10),
         });
         const result = response.data;
+        console.log(`[optimization] ML engine response: success=${result?.success}, error=${result?.error}`);
         if (!result || !result.success) {
             return res.status(400).json({
                 success: false,
                 error: result?.error || 'Optimization failed',
+                mlEngineResponse: result,
             });
         }
         const id = `opt_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
@@ -309,7 +313,7 @@ apiV1.post('/optimization/run', async (req, res) => {
         res.json({ success: true, id, result });
     }
     catch (error) {
-        console.error('Optimization run error:', error);
+        console.error('[optimization] Error:', error);
         const message = error.response?.data?.error ||
             error.response?.data?.message ||
             error.message ||
@@ -317,6 +321,7 @@ apiV1.post('/optimization/run', async (req, res) => {
         res.status(500).json({
             success: false,
             error: message,
+            details: error.response?.data || null,
         });
     }
 });
