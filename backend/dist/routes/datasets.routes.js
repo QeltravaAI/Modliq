@@ -8,6 +8,7 @@ const multer_1 = __importDefault(require("multer"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const csv_parser_1 = __importDefault(require("csv-parser"));
+const auth_1 = require("../middleware/auth");
 const router = express_1.default.Router();
 const UPLOADS_DIR = path_1.default.join(__dirname, '../../uploads');
 if (!fs_1.default.existsSync(UPLOADS_DIR)) {
@@ -40,7 +41,6 @@ function computeMetadata(data) {
     let missingValues = 0;
     const numericColumns = new Set();
     const categoricalColumns = new Set();
-    // Check types based on first non-null row for each column
     const cols = Object.keys(data[0]);
     cols.forEach(col => {
         let isNumeric = false;
@@ -52,7 +52,7 @@ function computeMetadata(data) {
                 if (!isNaN(Number(val))) {
                     isNumeric = true;
                 }
-                break; // Found a valid type indicator
+                break;
             }
         }
         if (!allNull) {
@@ -77,7 +77,7 @@ function computeMetadata(data) {
         categoricalColumns: Array.from(categoricalColumns),
     };
 }
-router.post('/upload', upload.single('dataset'), async (req, res) => {
+router.post('/upload', auth_1.verifySupabaseToken, upload.single('dataset'), async (req, res) => {
     try {
         if (!req.file) {
             return res.status(400).json({ message: 'No file uploaded' });
@@ -110,7 +110,7 @@ router.post('/upload', upload.single('dataset'), async (req, res) => {
         res.status(500).json({ message: 'Failed to process CSV' });
     }
 });
-router.post('/demo', async (req, res) => {
+router.post('/demo', auth_1.verifySupabaseToken, async (req, res) => {
     try {
         const demoPath = path_1.default.join(__dirname, '../../../ml-engine/data/demo_dataset.csv');
         if (!fs_1.default.existsSync(demoPath)) {
@@ -130,7 +130,7 @@ router.post('/demo', async (req, res) => {
         res.status(500).json({ message: 'Failed to load demo dataset' });
     }
 });
-router.get('/:id/preview', async (req, res) => {
+router.get('/:id/preview', auth_1.verifySupabaseToken, async (req, res) => {
     try {
         const { id } = req.params;
         let filePath;

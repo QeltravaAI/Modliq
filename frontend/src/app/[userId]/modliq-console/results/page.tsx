@@ -1,11 +1,13 @@
 'use client';
 
 import React from 'react';
-import { BarChart2, ArrowRight, TrendingUp, DollarSign, Gauge, Download } from 'lucide-react';
+import { BarChart2, ArrowRight, TrendingUp, DollarSign, Gauge, Download, ShieldCheck, ShieldAlert, Loader2, Zap } from 'lucide-react';
 import { usePipelineStore } from '@/store/pipelineStore';
 import OptimizationCurve from '@/components/charts/OptimizationCurve';
 import PredictionChart from '@/components/charts/PredictionChart';
 import { Button } from '@/components/ui/button';
+import axios from 'axios';
+import AiInsightCard from '@/components/ai/AiInsightCard';
 
 export default function ResultsPage() {
   const result = usePipelineStore((s) => s.result);
@@ -34,6 +36,7 @@ export default function ResultsPage() {
 
   const filename = usePipelineStore((s) => s.filename);
   const intent = usePipelineStore((s) => s.intent);
+  const healthReport = usePipelineStore((s) => s.healthReport);
 
   const generateSOP = () => {
     const lines = [
@@ -92,18 +95,97 @@ export default function ResultsPage() {
     URL.revokeObjectURL(url);
   };
 
+  // State hooks for AI actions on Results page
+  const [showAiSop, setShowAiSop] = React.useState(false);
+  const [aiSopContent, setAiSopContent] = React.useState<any>(null);
+  const [sopLoading, setSopLoading] = React.useState(false);
+  const [sopError, setSopError] = React.useState<string | null>(null);
+
+  const fetchAiSop = async () => {
+    setShowAiSop(true);
+    if (aiSopContent) return;
+    setSopLoading(true);
+    setSopError(null);
+    try {
+      const res = await axios.post('/api/ai/sop');
+      if (res.data.code === 'AI_NOT_CONFIGURED') {
+        // Fallback: Trigger baseline file download instead
+        setSopError('AI key not configured. Triggering baseline markdown download instead.');
+        generateSOP();
+      } else {
+        setAiSopContent(res.data);
+      }
+    } catch (e) {
+      console.error(e);
+      setSopError('Failed to generate AI SOP. Reverting to baseline.');
+      generateSOP();
+    } finally {
+      setSopLoading(false);
+    }
+  };
+
   return (
-    <div className="p-8 max-w-7xl mx-auto h-full flex flex-col overflow-y-auto">
-      <header className="mb-8 flex justify-between items-start">
+    <div className="p-8 max-w-7xl mx-auto h-full flex flex-col overflow-y-auto space-y-6">
+      <header className="flex justify-between items-start">
         <div>
           <h1 className="text-2xl font-bold text-[#1B2A4A]">Optimization Results</h1>
           <p className="text-slate-500 text-sm mt-1">{result.display_name || 'Yield Optimizer'} — {result.model_type || 'Random Forest'}</p>
         </div>
-        <Button onClick={generateSOP} className="flex items-center gap-2">
-          <Download className="w-4 h-4" />
-          Generate Trial SOP
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={fetchAiSop} disabled={sopLoading} className="flex items-center gap-2">
+            {sopLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Download className="w-4 h-4" />
+            )}
+            Generate AI Trial SOP
+          </Button>
+          <Button onClick={generateSOP} variant="outline" className="flex items-center gap-2">
+            <Download className="w-4 h-4" />
+            Export Markdown
+          </Button>
+        </div>
       </header>
+
+      {/* AI Trial SOP Modal */}
+      {showAiSop && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl relative flex flex-col max-h-[85vh]">
+            <div className="px-6 py-4 border-b border-[#D0E2F0] bg-slate-50 flex items-center justify-between">
+              <h3 className="font-bold text-[#1B2A4A]">AI Generated Standard Operating Procedure</h3>
+              <button 
+                onClick={() => setShowAiSop(false)}
+                 className="text-slate-500 hover:text-slate-700 font-bold text-sm"
+              >
+                Close [X]
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto flex-1 space-y-4">
+              {sopLoading ? (
+                <div className="flex flex-col items-center justify-center p-12 text-slate-500">
+                  <Loader2 className="w-6 h-6 animate-spin text-[#2B70AB] mb-2" />
+                  <span>Constructing Standard Operating Procedure checks...</span>
+                </div>
+              ) : sopError ? (
+                <p className="text-xs text-amber-700 bg-amber-50 p-4 border rounded-xl">{sopError}</p>
+              ) : (
+                <>
+                  <h4 className="text-base font-bold text-slate-900">{aiSopContent?.title}</h4>
+                  {aiSopContent?.sections?.map((sec: any, idx: number) => (
+                    <div key={idx} className="border-t pt-3 first:border-0 first:pt-0">
+                      <h5 className="text-sm font-bold text-slate-800 mb-1">{sec.heading}</h5>
+                      <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-line">{sec.content}</p>
+                    </div>
+                  ))}
+                  <div className="text-[10px] text-slate-400 italic pt-4 border-t">
+                    AI-generated recommendation. Validate before production use.
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
         <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
@@ -157,9 +239,58 @@ export default function ResultsPage() {
         </div>
       </div>
 
+      {/* Data Confidence Banner */}
+      {healthReport && (
+        <div className={`rounded-xl border p-5 mb-8 flex items-start gap-4
+          ${
+            healthReport.score >= 75
+              ? 'bg-blue-50 border-blue-200'
+              : healthReport.score >= 60
+              ? 'bg-amber-50 border-amber-200'
+              : 'bg-red-50 border-red-200'
+          }`}
+        >
+          <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0
+            ${
+              healthReport.score >= 75
+                ? 'bg-blue-100'
+                : healthReport.score >= 60
+                ? 'bg-amber-100'
+                : 'bg-red-100'
+            }`}
+          >
+            {healthReport.score >= 75
+              ? <ShieldCheck className="w-5 h-5 text-blue-600" />
+              : <ShieldAlert className={`w-5 h-5 ${healthReport.score >= 60 ? 'text-amber-600' : 'text-red-600'}`} />}
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-slate-800">
+              Data Readiness at Optimization Time: {healthReport.score} / 100 — {healthReport.status.replace('_', ' ')}
+            </p>
+            {healthReport.warnings.length > 0 ? (
+              <p className="text-xs text-slate-600 mt-1">
+                This recommendation was generated from a dataset with {healthReport.warnings.length} warning{healthReport.warnings.length !== 1 ? 's' : ''}.
+                {' '}Review outlier and sample-size notes before production trial.
+              </p>
+            ) : (
+              <p className="text-xs text-slate-600 mt-1">
+                Dataset passed health checks at optimization time. Validate recommended settings through controlled trials.
+              </p>
+            )}
+            {healthReport.mode === 'target-aware' && healthReport.targetColumn && (
+              <p className="text-xs text-slate-500 mt-1">
+                Target analyzed: <span className="font-medium">{healthReport.targetColumn}</span>
+                {' '}· Generated {new Date(healthReport.generatedAt).toLocaleDateString()}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
           <h3 className="text-lg font-semibold text-slate-800 mb-4">Recommended Settings</h3>
+
           <div className="space-y-2">
             {result.recommended_settings && Object.entries(result.recommended_settings).map(([key, value]) => {
               const range = result.recommended_range?.[key];
@@ -217,6 +348,40 @@ export default function ResultsPage() {
           <PredictionChart data={result.chart_data} />
         </div>
       )}
+
+      {/* AI Decision Support */}
+      <AiInsightCard module="optimization" />
+
+      {/* Operational Impact Section */}
+      <div className="bg-white rounded-2xl border border-[#D0E2F0] p-6 shadow-sm">
+        <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
+          <Zap className="w-5 h-5 text-amber-500 fill-amber-500" />
+          Predicted Operational Impact
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] font-bold text-slate-400 block mb-0.5">ESTIMATED SCRAP REDUCTION</span>
+            <p className="text-xl font-extrabold text-[#2B70AB]">
+              {result.yield_improvement ? `${(result.yield_improvement * 1.2).toFixed(1)}%` : '—'}
+            </p>
+            <p className="text-[10px] text-slate-500 mt-1">Based on improved quality yield distribution.</p>
+          </div>
+          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] font-bold text-slate-400 block mb-0.5">ADDITIONAL GOOD Finished UNITS</span>
+            <p className="text-xl font-extrabold text-[#1B2A4A]">
+              {roi.additional_good_units ? roi.additional_good_units.toLocaleString() : '—'} units/month
+            </p>
+            <p className="text-[10px] text-slate-500 mt-1">Assuming current production volume.</p>
+          </div>
+          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
+            <span className="text-[10px] font-bold text-slate-400 block mb-0.5">LEAN IMPROVEMENT ALIGNMENT</span>
+            <p className="text-sm font-bold text-slate-800 leading-snug">
+              Standardize {topDriver?.feature || 'Mixer setpoints'}
+            </p>
+            <p className="text-[10px] text-slate-500 mt-1">Suggested follow-up Kaizen backlog item.</p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

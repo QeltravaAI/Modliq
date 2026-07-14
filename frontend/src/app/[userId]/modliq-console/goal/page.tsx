@@ -2,15 +2,19 @@
 
 import React, { useState, useCallback, use } from 'react';
 import { useRouter } from 'next/navigation';
-import { Target, Sparkles, ChevronRight, Calculator, Loader2 } from 'lucide-react';
+import {
+  Target, Sparkles, ChevronRight, Calculator, Loader2,
+  ShieldCheck, ShieldAlert, ShieldX, CheckCircle2,
+} from 'lucide-react';
 import { usePipelineStore } from '@/store/pipelineStore';
 import { parseGoal } from '@/services/optimization.service';
+import { getDatasetHealth } from '@/services/dataset.service';
 import { IntentState } from '@/store/pipelineStore';
 
 export default function GoalPage({ params }: { params: Promise<{ userId: string }> }) {
   const resolvedParams = use(params);
   const router = useRouter();
-  const { filename, analytics, intent, setIntent } = usePipelineStore();
+  const { filename, analytics, intent, setIntent, setHealthReport, healthReport } = usePipelineStore();
 
   const EXAMPLE_GOALS = [
     "Maximize Yield above 95% while keeping Temperature below 90°C",
@@ -23,6 +27,10 @@ export default function GoalPage({ params }: { params: Promise<{ userId: string 
   const [parseError, setParseError] = useState<string | null>(null);
   const [examples, setExamples] = useState<string[]>([]);
   const [editableIntent, setEditableIntent] = useState<IntentState | null>(null);
+
+  // Target-aware health check state
+  const [targetHealthLoading, setTargetHealthLoading] = useState(false);
+  const [targetHealthError, setTargetHealthError] = useState<string | null>(null);
 
   const columns = [
     ...(analytics?.numericColumns || []),
@@ -38,10 +46,11 @@ export default function GoalPage({ params }: { params: Promise<{ userId: string 
     if (!goalText.trim()) return;
     setParsing(true);
     setParseError(null);
+    setTargetHealthError(null);
 
     try {
       const result = await parseGoal(goalText, 'yield_optimizer', columns);
-      setEditableIntent({
+      const parsed: IntentState = {
         raw_text: result.raw_text,
         template_id: result.template_id,
         target: result.target,
@@ -49,8 +58,28 @@ export default function GoalPage({ params }: { params: Promise<{ userId: string 
         threshold: result.threshold,
         features: result.features,
         constraints: result.constraints,
-      });
+      };
+      setEditableIntent(parsed);
       setExamples([]);
+
+      // Run target-aware health check in parallel
+      if (filename && result.target) {
+        setTargetHealthLoading(true);
+        try {
+          const enriched = await getDatasetHealth(filename, {
+            targetColumn: result.target,
+            features: result.features || [],
+            mode: 'target-aware',
+          });
+          if (enriched?.success) {
+            setHealthReport(enriched);
+          }
+        } catch {
+          setTargetHealthError('Target analysis could not be completed. You can continue with optimization.');
+        } finally {
+          setTargetHealthLoading(false);
+        }
+      }
     } catch (err: any) {
       const detail = err.response?.data;
       setParseError(detail?.error || 'Failed to parse goal');
@@ -58,13 +87,13 @@ export default function GoalPage({ params }: { params: Promise<{ userId: string 
     } finally {
       setParsing(false);
     }
-  }, [goalText, columns]);
+  }, [goalText, columns, filename, setHealthReport]);
 
   const handleOptimize = useCallback(() => {
     if (!editableIntent) return;
     setIntent(editableIntent);
     router.push(`/${resolvedParams.userId}/modliq-console/optimization-progress`);
-  }, [editableIntent, setIntent, router]);
+  }, [editableIntent, setIntent, router, resolvedParams]);
 
   if (!filename) {
     return (
@@ -73,13 +102,16 @@ export default function GoalPage({ params }: { params: Promise<{ userId: string 
           <h1 className="text-2xl font-bold text-[#1B2A4A]">Define Goal</h1>
           <p className="text-slate-500 text-sm mt-1">Describe your optimization goal in plain English.</p>
         </header>
-
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-amber-800 text-sm">
           Please upload or select a dataset first before defining an optimization goal.
         </div>
       </div>
     );
   }
+
+  // Target analysis panel (from the currently persisted healthReport)
+  const targetAnalysis = healthReport?.targetAnalysis;
+  const showTargetPanel = !!editableIntent && (targetHealthLoading || !!targetAnalysis || !!targetHealthError);
 
   return (
     <div className="p-8 max-w-5xl mx-auto h-full flex flex-col">
@@ -88,6 +120,24 @@ export default function GoalPage({ params }: { params: Promise<{ userId: string 
         <p className="text-slate-500 text-sm mt-1">Describe your optimization goal in plain English.</p>
       </header>
 
+      {/* Readiness banner (generic report from upload) */}
+      {healthReport && !editableIntent && healthReport.mode === 'generic' && (
+        <div className={`mb-6 rounded-xl border px-4 py-3 flex items-center gap-3 text-sm
+          ${healthReport.score >= 75 ? 'bg-blue-50 border-blue-200 text-blue-800' :
+            healthReport.score >= 60 ? 'bg-amber-50 border-amber-200 text-amber-800' :
+            'bg-red-50 border-red-200 text-red-800'}`}
+        >
+          <ShieldCheck className="w-5 h-5 shrink-0" />
+          <span>
+            <span className="font-semibold">Dataset Readiness: {healthReport.score}/100 — {healthReport.status.replace('_', ' ')}</span>
+            {healthReport.warnings.length > 0 && (
+              <span className="ml-2 text-xs opacity-75">({healthReport.warnings.length} warning{healthReport.warnings.length !== 1 ? 's' : ''})</span>
+            )}
+          </span>
+        </div>
+      )}
+
+      {/* Goal input */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-6">
         <label className="block text-sm font-medium text-slate-700 mb-2">Your Goal</label>
         <textarea
@@ -128,10 +178,46 @@ export default function GoalPage({ params }: { params: Promise<{ userId: string 
             )}
           </button>
 
+          {/* AI Goal Coach Button */}
+          {goalText.trim() && (
+            (() => {
+              const [showCoach, setShowCoach] = useState(false);
+              const AiInsightCard = require('@/components/ai/AiInsightCard').default;
+
+              return (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowCoach(!showCoach)}
+                    className="px-4 py-2.5 border border-[#D0E2F0] hover:border-[#2B70AB] bg-white text-slate-700 rounded-lg text-sm font-medium shadow-sm transition-colors flex items-center gap-2"
+                  >
+                    <Sparkles className="w-4 h-4 text-amber-500 fill-amber-500" />
+                    {showCoach ? 'Hide Coach' : 'Improve Goal with AI'}
+                  </button>
+                  {showCoach && (
+                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                      <div className="bg-white rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl relative">
+                        <button 
+                          onClick={() => setShowCoach(false)}
+                           className="absolute top-4 right-4 text-slate-500 hover:text-slate-700 font-bold text-sm"
+                        >
+                          Close [X]
+                        </button>
+                        <div className="p-6">
+                          <AiInsightCard module="goal" rawGoal={goalText} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()
+          )}
+
           {editableIntent && (
             <button
               onClick={handleOptimize}
-              className="px-6 py-2.5 bg-slate-900 text-white rounded-lg text-sm font-medium shadow hover:bg-slate-800 transition-colors flex items-center gap-2"
+              className="px-6 py-2.5 bg-slate-900 text-white rounded-lg text-sm font-medium shadow hover:bg-slate-800 transition-colors flex items-center gap-2 animate-bounce"
             >
               Optimize Settings
               <ChevronRight className="w-4 h-4" />
@@ -162,8 +248,9 @@ export default function GoalPage({ params }: { params: Promise<{ userId: string 
         )}
       </div>
 
+      {/* Parsed goal editor */}
       {editableIntent && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-4">
           <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
             <Target className="w-5 h-5 text-[#2B70AB]" />
             Parsed Goal
@@ -238,6 +325,96 @@ export default function GoalPage({ params }: { params: Promise<{ userId: string 
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Target analysis panel */}
+      {showTargetPanel && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <ShieldCheck className="w-5 h-5 text-[#2B70AB]" />
+            <h3 className="text-sm font-semibold text-slate-800">Target Analysis</h3>
+          </div>
+
+          {targetHealthLoading && (
+            <div className="flex items-center gap-2 text-sm text-slate-500">
+              <Loader2 className="w-4 h-4 animate-spin text-[#2B70AB]" />
+              <span>Analyzing target column quality…</span>
+            </div>
+          )}
+
+          {targetHealthError && !targetHealthLoading && (
+            <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg p-3">
+              <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
+              <p>{targetHealthError}</p>
+            </div>
+          )}
+
+          {!targetHealthLoading && targetAnalysis && (
+            <div>
+              {targetAnalysis.isUsableTarget ? (
+                <div className="flex items-center gap-2 text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 mb-3">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span className="text-sm font-medium">
+                    Target <span className="font-bold">{targetAnalysis.targetColumn}</span> is suitable for optimization
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-3">
+                  <ShieldX className="w-4 h-4" />
+                  <span className="text-sm font-medium">
+                    Target <span className="font-bold">{targetAnalysis.targetColumn}</span> has issues that may affect optimization quality
+                  </span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-3 gap-3 text-xs mb-3">
+                <div className="bg-slate-50 rounded-lg p-3 border border-slate-100 text-center">
+                  <div className="font-bold text-slate-800">{targetAnalysis.uniqueValues}</div>
+                  <div className="text-slate-500">Unique values</div>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-3 border border-slate-100 text-center">
+                  <div className={`font-bold ${targetAnalysis.missingValues > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                    {targetAnalysis.missingValues}
+                  </div>
+                  <div className="text-slate-500">Missing</div>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-3 border border-slate-100 text-center">
+                  <div className={`font-bold ${targetAnalysis.outlierCount > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                    {targetAnalysis.outlierCount}
+                  </div>
+                  <div className="text-slate-500">Outliers</div>
+                </div>
+              </div>
+
+              {targetAnalysis.variance !== null && (
+                <p className="text-xs text-slate-500 mb-2">
+                  Variance: <span className="font-medium text-slate-700">{targetAnalysis.variance.toFixed(2)}</span>
+                </p>
+              )}
+
+              {targetAnalysis.warnings.length > 0 && (
+                <div className="space-y-1">
+                  {targetAnalysis.warnings.map((w, i) => (
+                    <div key={i} className="flex items-start gap-2 text-xs text-amber-700">
+                      <ShieldAlert className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                      <span>{w}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Leakage warnings from main warnings list */}
+              {healthReport?.warnings
+                .filter(w => w.code === 'TARGET_LEAKAGE')
+                .map((w, i) => (
+                  <div key={i} className="flex items-start gap-2 mt-2 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                    <ShieldX className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                    <p className="text-xs text-red-700">{w.message}</p>
+                  </div>
+                ))}
+            </div>
+          )}
         </div>
       )}
     </div>

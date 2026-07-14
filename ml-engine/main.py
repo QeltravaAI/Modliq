@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException, Depends
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -51,6 +51,7 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 from routers.goal import router as goal_router
+from dependencies import verify_service_key
 
 app = FastAPI(title="Modliq ML Engine", version="1.0.0")
 
@@ -58,17 +59,18 @@ app = FastAPI(title="Modliq ML Engine", version="1.0.0")
 # CORS
 # ==================================================
 CLIENT_ORIGIN = os.getenv("CLIENT_ORIGIN", "https://modliq.vercel.app")
+BACKEND_ORIGIN = os.getenv("BACKEND_ORIGIN", "https://modliq-1.onrender.com")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[CLIENT_ORIGIN.strip(), "http://localhost:3000"],
+    allow_origins=[CLIENT_ORIGIN.strip(), BACKEND_ORIGIN.strip(), "http://localhost:3000"],
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Modliq-Service-Key"],
 )
 
 # ==================================================
-# QUALITY STUDIO ROUTER
+# ROUTERS
 # ==================================================
 app.include_router(goal_router)
 
@@ -121,7 +123,7 @@ def warmup():
 # ==================================================
 # TRAIN MODEL
 # ==================================================
-@app.post("/train")
+@app.post("/train", dependencies=[Depends(verify_service_key)])
 def train_model(request: TrainRequest):
     print("================================")
     print("TRAINING STARTED")
@@ -792,7 +794,7 @@ class OptimizeRequest(BaseModel):
 # ==================================================
 # OPTIMIZE-YIELD ENDPOINT
 # ==================================================
-@app.post("/optimize-yield")
+@app.post("/optimize-yield", dependencies=[Depends(verify_service_key)])
 def optimize_yield(request: OptimizeRequest):
 
     print("================================")
@@ -1228,3 +1230,33 @@ def optimize_yield(request: OptimizeRequest):
             "success": False,
             "error": str(error),
         }
+
+# ==================================================
+# DATASET HEALTH
+# ==================================================
+class DatasetHealthRequest(BaseModel):
+    rows: list[dict]
+    targetColumn: str | None = None
+    features: list[str] | None = None
+    mode: str = "generic"
+
+from services.dataset_health import analyze_dataset_health
+
+MAX_HEALTH_ROWS = 10_000
+
+@app.post("/dataset-health", dependencies=[Depends(verify_service_key)])
+def dataset_health(request: DatasetHealthRequest):
+    total_rows = len(request.rows)
+    sampled = total_rows > MAX_HEALTH_ROWS
+    rows_to_analyze = request.rows[:MAX_HEALTH_ROWS] if sampled else request.rows
+    rows_analyzed = len(rows_to_analyze)
+
+    df = pd.DataFrame(rows_to_analyze)
+    result = analyze_dataset_health(df, request.targetColumn, request.features, request.mode)
+
+    # Attach payload metadata
+    result["sampled"] = sampled
+    result["rowsAnalyzed"] = rows_analyzed
+    result["totalRows"] = total_rows
+
+    return result

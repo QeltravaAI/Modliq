@@ -3,6 +3,7 @@ import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
 import csv from 'csv-parser';
+import { verifySupabaseToken } from '../middleware/auth';
 
 const router = express.Router();
 
@@ -42,7 +43,6 @@ function computeMetadata(data: any[]) {
   const numericColumns = new Set<string>();
   const categoricalColumns = new Set<string>();
 
-  // Check types based on first non-null row for each column
   const cols = Object.keys(data[0]);
   cols.forEach(col => {
     let isNumeric = false;
@@ -54,7 +54,7 @@ function computeMetadata(data: any[]) {
         if (!isNaN(Number(val))) {
           isNumeric = true;
         }
-        break; // Found a valid type indicator
+        break;
       }
     }
     if (!allNull) {
@@ -80,7 +80,7 @@ function computeMetadata(data: any[]) {
   };
 }
 
-router.post('/upload', upload.single('dataset'), async (req: any, res: any) => {
+router.post('/upload', verifySupabaseToken, upload.single('dataset'), async (req: any, res: any) => {
   try {
     if (!req.file) {
       return res.status(400).json({ message: 'No file uploaded' });
@@ -117,7 +117,7 @@ router.post('/upload', upload.single('dataset'), async (req: any, res: any) => {
   }
 });
 
-router.post('/demo', async (req: any, res: any) => {
+router.post('/demo', verifySupabaseToken, async (req: any, res: any) => {
   try {
     const demoPath = path.join(__dirname, '../../../ml-engine/data/demo_dataset.csv');
     if (!fs.existsSync(demoPath)) {
@@ -139,7 +139,7 @@ router.post('/demo', async (req: any, res: any) => {
   }
 });
 
-router.get('/:id/preview', async (req: any, res: any) => {
+router.get('/:id/preview', verifySupabaseToken, async (req: any, res: any) => {
   try {
     const { id } = req.params;
     let filePath;

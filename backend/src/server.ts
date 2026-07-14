@@ -11,6 +11,8 @@ import fs from 'fs';
 import csv from 'csv-parser';
 import path from 'path';
 import axios from 'axios';
+import { verifySupabaseToken } from './middleware/auth';
+import { initDb, createOptimizationJobDb, getOptimizationJobDb, updateOptimizationJobDb } from './db/optimizationJobs';
 
 dotenv.config();
 
@@ -18,13 +20,45 @@ const app = express();
 const port = process.env.PORT || 3001;
 const ML_ENGINE_URL = process.env.ML_ENGINE_URL || 'http://127.0.0.1:8000';
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'https://modliq.vercel.app';
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://zygjhjhtbanevzlasjmj.supabase.co';
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
+const ML_INTERNAL_API_KEY = process.env.ML_INTERNAL_API_KEY || '';
+
+function mlEngineHeaders() {
+  const headers: Record<string, string> = {};
+  if (ML_INTERNAL_API_KEY) {
+    headers['X-Modliq-Service-Key'] = ML_INTERNAL_API_KEY;
+  }
+  return headers;
+}
 
 console.log(`[backend] ML_ENGINE_URL=${ML_ENGINE_URL}`);
 console.log(`[backend] CLIENT_ORIGIN=${CLIENT_ORIGIN}`);
 
-// Scope CORS strictly to the frontend origin and localhost.
 app.use(cors({ origin: [CLIENT_ORIGIN, 'http://localhost:3000'] }));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.set('trust proxy', true);
+
+// ==================================================
+// RATE LIMITING (simple in-memory sliding window)
+// ==================================================
+const rateLimitWindow = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10);
+const rateLimitMax = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '120', 10);
+const rateLimitHits = new Map<string, number[]>();
+
+function rateLimit(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const key = (req as any).user?.id || req.ip || 'anonymous';
+  const now = Date.now();
+  const hits = rateLimitHits.get(key) || [];
+  const recent = hits.filter(t => now - t < rateLimitWindow);
+  recent.push(now);
+  rateLimitHits.set(key, recent);
+
+  if (recent.length > rateLimitMax) {
+    return res.status(429).json({ error: 'Too many requests. Please slow down.' });
+  }
+  next();
+}
 
 // ==================================================
 // DATASETS (typed routes)
@@ -32,26 +66,32 @@ app.use(express.json());
 app.use('/api/datasets', datasetsRoutes);
 
 // ==================================================
-// HEALTH
+// SERVER
 // ==================================================
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'modliq-backend' });
+app.listen(port, () => {
+  console.log(`Backend service running on port ${port}`);
 });
 
 // ==================================================
 // STORAGE + HELPERS
 // ==================================================
 const isProduction = process.env.NODE_ENV === 'production';
+const STORE_DIR = isProduction ? '/tmp/modliq' : path.join(process.cwd(), 'uploads');
 const uploadDir = isProduction
-  ? path.join('/tmp/modliq', 'uploads')
+  ? path.join(STORE_DIR, 'uploads')
   : path.join(__dirname, '../uploads');
+
+function ensureDir() {
+  try {
+    if (!fs.existsSync(STORE_DIR)) {
+      fs.mkdirSync(STORE_DIR, { recursive: true });
+    }
+  } catch (err) {
+    console.error('Failed to create store directory:', err);
+  }
+}
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
-// Resolve the demo dataset CSV across possible deploy layouts. Render's working
-// directory varies (monorepo checkout vs standalone service), so we probe several
-// candidate locations and fall back to a bounded recursive search. This fixes the
-// production bug where `process.cwd()/../ml-engine/...` resolved to a non-existent
-// /tmp/ml-engine path.
 function searchForDemo(dir: string, depth: number): string | null {
   if (depth < 0) return null;
   let entries: fs.Dirent[];
@@ -151,7 +191,7 @@ function findFileInUploads(filename: string): string | null {
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const userId = (req.params.userId as string) || 'default_user';
+    const userId = (req.params.userId as string as string) || 'default_user';
     const userDir = path.join(uploadDir, userId);
     if (!fs.existsSync(userDir)) fs.mkdirSync(userDir, { recursive: true });
     cb(null, userDir);
@@ -178,23 +218,23 @@ const apiV1 = express.Router();
 // --------------------------------------------------
 // Workspace
 // --------------------------------------------------
-apiV1.post('/workspace/:userId/dataset', (req, res) => {
+apiV1.post('/workspace/:userId/dataset', verifySupabaseToken, (req, res) => {
   const { datasetId } = req.body;
   if (!datasetId) return res.status(400).json({ error: 'datasetId required' });
-  workspaceStore.setActiveDataset(req.params.userId, datasetId);
+  workspaceStore.setActiveDataset(req.params.userId as string, datasetId);
   res.json({ success: true, activeDatasetId: datasetId });
 });
 
-apiV1.get('/workspace/:userId', (req, res) => {
-  const workspace = workspaceStore.getWorkspace(req.params.userId);
+apiV1.get('/workspace/:userId', verifySupabaseToken, (req, res) => {
+  const workspace = workspaceStore.getWorkspace(req.params.userId as string);
   res.json({ success: true, workspace });
 });
 
 // --------------------------------------------------
 // Datasets
 // --------------------------------------------------
-apiV1.get('/datasets/:id/preview', (req, res) => {
-  const dataset = datasetStore.getDataset(req.params.id);
+apiV1.get('/datasets/:id/preview', verifySupabaseToken, (req, res) => {
+  const dataset = datasetStore.getDataset(req.params.id as string);
   if (!dataset) return res.status(404).json({ error: 'Dataset not found' });
 
   const rows = parseInt(req.query.rows as string, 10) || 50;
@@ -211,8 +251,39 @@ apiV1.get('/datasets/:id/preview', (req, res) => {
     .on('error', () => res.status(500).json({ error: 'Failed to read preview' }));
 });
 
-apiV1.post('/datasets/demo/:userId', async (req, res) => {
-  const userId = req.params.userId;
+apiV1.post('/datasets/:id/health', verifySupabaseToken, async (req, res) => {
+  const dataset = datasetStore.getDataset(req.params.id as string);
+  if (!dataset) return res.status(404).json({ error: 'Dataset not found' });
+
+  const rows: any[] = [];
+  try {
+    await new Promise<void>((resolve, reject) => {
+      fs.createReadStream(dataset.filePath)
+        .pipe(csv())
+        .on('data', (data) => rows.push(data))
+        .on('end', resolve)
+        .on('error', reject);
+    });
+
+    const mlPayload = {
+      rows,
+      targetColumn: req.body.targetColumn || null,
+      features: req.body.features || null,
+      mode: req.body.mode || 'generic',
+    };
+
+    const response = await axios.post(`${ML_ENGINE_URL}/dataset-health`, mlPayload, {
+      headers: mlEngineHeaders(),
+    });
+    res.json(response.data);
+  } catch (err: any) {
+    console.error('Health check error:', err.message);
+    res.status(500).json({ success: false, error: 'Failed to compute dataset health' });
+  }
+});
+
+apiV1.post('/datasets/demo/:userId', verifySupabaseToken, async (req, res) => {
+  const userId = req.params.userId as string;
   const demoFile = findDemoDatasetPath();
   if (!demoFile) {
     return res.status(500).json({ success: false, error: 'Demo dataset is not available on the server.' });
@@ -255,7 +326,7 @@ apiV1.post('/datasets/demo/:userId', async (req, res) => {
   });
 });
 
-apiV1.post('/datasets/upload/:userId', upload.single('dataset'), async (req, res) => {
+apiV1.post('/datasets/upload/:userId', verifySupabaseToken, upload.single('dataset'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, error: 'No file uploaded' });
 
@@ -338,7 +409,7 @@ apiV1.post('/datasets/upload/:userId', upload.single('dataset'), async (req, res
           analytics,
         });
 
-        workspaceStore.setActiveDataset(req.params.userId as string, datasetId);
+        workspaceStore.setActiveDataset(req.params.userId as string as string, datasetId);
 
     res.json({
       success: true,
@@ -360,8 +431,32 @@ apiV1.post('/datasets/upload/:userId', upload.single('dataset'), async (req, res
 // --------------------------------------------------
 // Optimization
 // --------------------------------------------------
-apiV1.post('/optimization/run', async (req, res) => {
-  console.log('[optimization] Request body:', JSON.stringify(req.body).slice(0, 500));
+function resolveOptimizationFile(filename: string): { localPath: string; dataset: any } | null {
+  let localPath = path.join(uploadDir, filename);
+  const dataset = datasetStore.getDataset(filename);
+  if (dataset) {
+    localPath = dataset.filePath;
+  } else if (filename === 'manufacturing_data.csv' || filename === 'demo_dataset.csv') {
+    const dp = findDemoDatasetPath();
+    if (dp) localPath = dp;
+  }
+  const resolvedPath =
+    fs.existsSync(localPath) && fs.statSync(localPath).isFile()
+      ? localPath
+      : findFileInUploads(filename);
+  if (!resolvedPath) return null;
+
+  // Path traversal guard: ensure resolved path is within uploadDir
+  const realUploadDir = fs.realpathSync(uploadDir);
+  const realResolved = fs.realpathSync(resolvedPath);
+  if (!realResolved.startsWith(realUploadDir)) {
+    return null;
+  }
+
+  return { localPath: resolvedPath, dataset };
+}
+
+apiV1.post('/optimization/run', verifySupabaseToken, rateLimit, async (req, res) => {
   try {
     const { filename, template_id, intent, monthly_volume, unit_value } = req.body;
 
@@ -369,37 +464,18 @@ apiV1.post('/optimization/run', async (req, res) => {
       return res.status(400).json({ success: false, error: 'filename is required' });
     }
 
-    let fileContent: string | null = null;
-    let localPath = path.join(uploadDir, filename);
-
-    const dataset = datasetStore.getDataset(filename);
-    if (dataset) {
-      localPath = dataset.filePath;
-    } else if (filename === 'manufacturing_data.csv' || filename === 'demo_dataset.csv') {
-      const dp = findDemoDatasetPath();
-      if (dp) localPath = dp;
-    }
-
-    const resolvedPath = fs.existsSync(localPath) && fs.statSync(localPath).isFile()
-      ? localPath
-      : findFileInUploads(filename);
-
-    if (resolvedPath) {
-      fileContent = fs.readFileSync(resolvedPath).toString('base64');
-      console.log(`[optimization] Loaded ${(fileContent.length / 1024).toFixed(1)} KB from ${resolvedPath}`);
-    } else {
-      console.log(`[optimization] File not found: ${filename}`);
-    }
-
-    if (!fileContent) {
+    const resolved = resolveOptimizationFile(filename);
+    if (!resolved) {
       return res.status(400).json({
         success: false,
-        error: `Dataset file not found on server: ${localPath}. Upload a fresh dataset or load the demo.`,
+        error: `Dataset file not found on server: ${filename}. Upload a fresh dataset or load the demo.`,
       });
     }
 
+    const fileContent = fs.readFileSync(resolved.localPath).toString('base64');
+
     const payload = {
-      filename: dataset ? dataset.filename : filename,
+      filename: resolved.dataset ? resolved.dataset.filename : filename,
       file_content: fileContent,
       template_id: template_id || 'yield_optimizer',
       target: intent?.target,
@@ -411,14 +487,11 @@ apiV1.post('/optimization/run', async (req, res) => {
       unit_value: unit_value || undefined,
     };
 
-    console.log(`[optimization] Sending to ${ML_ENGINE_URL}/optimize-yield, template=${payload.template_id}, target=${payload.target}`);
-
     const response = await axios.post(`${ML_ENGINE_URL}/optimize-yield`, payload, {
       timeout: parseInt(process.env.REQUEST_TIMEOUT_MS || '30000', 10),
+      headers: mlEngineHeaders(),
     });
     const result = response.data;
-
-    console.log(`[optimization] ML engine response: success=${result?.success}, error=${result?.error}`);
 
     if (!result || !result.success) {
       return res.status(400).json({
@@ -439,7 +512,7 @@ apiV1.post('/optimization/run', async (req, res) => {
 
     res.json({ success: true, id, result });
   } catch (error: any) {
-    console.error('[optimization] Error:', error);
+    console.error('[optimization] Error:', error.message);
     const message =
       error.response?.data?.error ||
       error.response?.data?.message ||
@@ -448,44 +521,65 @@ apiV1.post('/optimization/run', async (req, res) => {
     res.status(500).json({
       success: false,
       error: message,
-      details: error.response?.data || null,
     });
   }
 });
 
 // ==================================================
 // Optimization — ASYNC JOB PATTERN
-// The ML engine can take 20-60s+ (and >30s on a cold start). We never block the
-// HTTP response on that work: we create a job, run the ML call in the background
-// (with a generous/no timeout), and the client polls /optimization/jobs/:id.
+// Persisted via Prisma/Postgres for durability.
 // ==================================================
 interface OptJob {
   id: string;
+  userId: string;
+  datasetId?: string;
   status: 'running' | 'completed' | 'failed';
-  result?: any;
+  stage?: string;
+  progress?: number;
+  requestJson?: string;
+  resultJson?: string;
   error?: string;
   createdAt: number;
-}
-const optimizationJobs = new Map<string, OptJob>();
-
-function resolveOptimizationFile(filename: string): { localPath: string; dataset: any } | null {
-  let localPath = path.join(uploadDir, filename);
-  const dataset = datasetStore.getDataset(filename);
-  if (dataset) {
-    localPath = dataset.filePath;
-  } else if (filename === 'manufacturing_data.csv' || filename === 'demo_dataset.csv') {
-    const dp = findDemoDatasetPath();
-    if (dp) localPath = dp;
-  }
-  const resolvedPath =
-    fs.existsSync(localPath) && fs.statSync(localPath).isFile()
-      ? localPath
-      : findFileInUploads(filename);
-  if (!resolvedPath) return null;
-  return { localPath: resolvedPath, dataset };
+  updatedAt: number;
 }
 
-apiV1.post('/optimization/jobs', async (req, res) => {
+async function createOptimizationJobRecord(job: OptJob) {
+  await createOptimizationJobDb({
+    id: job.id,
+    userId: job.userId,
+    datasetId: job.datasetId,
+    status: job.status,
+    stage: job.stage,
+    progress: job.progress || 0,
+    requestJson: job.requestJson,
+    resultJson: job.resultJson,
+    error: job.error,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  });
+}
+
+async function updateOptimizationJobRecord(id: string, data: {
+  status?: string;
+  stage?: string;
+  progress?: number;
+  resultJson?: string;
+  error?: string;
+}) {
+  await updateOptimizationJobDb(id, data);
+}
+
+async function loadOptimizationJobsFromDb() {
+  // Optimization jobs are now loaded on demand from Postgres via getOptimizationJobDb.
+  // No bulk load needed at startup.
+}
+
+// Initialize durable job store on startup
+initDb().catch((err) => {
+  console.error('Failed to initialize optimization job database:', err);
+});
+
+apiV1.post('/optimization/jobs', verifySupabaseToken, rateLimit, async (req, res) => {
   try {
     const { filename, template_id, intent, monthly_volume, unit_value } = req.body;
     if (!filename) {
@@ -516,16 +610,26 @@ apiV1.post('/optimization/jobs', async (req, res) => {
     };
 
     const jobId = `job_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-    const job: OptJob = { id: jobId, status: 'running', createdAt: Date.now() };
-    optimizationJobs.set(jobId, job);
+    const userId = (req as any).user?.id || 'anonymous';
+    const jobRecord: OptJob = {
+      id: jobId,
+      userId,
+      datasetId: resolved.dataset?.id,
+      status: 'running',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      requestJson: JSON.stringify(payload),
+    };
 
-    // Generous timeout so cold-start ML engine calls are not truncated.
+    await createOptimizationJobRecord(jobRecord);
+
     const jobTimeout = parseInt(process.env.JOB_TIMEOUT_MS || '180000', 10);
 
     (async () => {
       try {
         const response = await axios.post(`${ML_ENGINE_URL}/optimize-yield`, payload, {
           timeout: jobTimeout,
+          headers: mlEngineHeaders(),
         });
         const result = response.data;
         if (result && result.success) {
@@ -535,16 +639,22 @@ apiV1.post('/optimization/jobs', async (req, res) => {
             template_id: payload.template_id,
             result,
           });
-          job.result = result;
-          job.status = 'completed';
+          await updateOptimizationJobRecord(jobId, {
+            status: 'completed',
+            resultJson: JSON.stringify(result),
+            progress: 100,
+          });
         } else {
-          job.status = 'failed';
-          job.error = result?.error || 'Optimization failed';
+          await updateOptimizationJobRecord(jobId, {
+            status: 'failed',
+            error: result?.error || 'Optimization failed',
+          });
         }
       } catch (error: any) {
-        job.status = 'failed';
-        job.error =
-          error.response?.data?.error || error.message || 'Optimization failed';
+        await updateOptimizationJobRecord(jobId, {
+          status: 'failed',
+          error: error.response?.data?.error || error.message || 'Optimization failed',
+        });
       }
     })();
 
@@ -554,15 +664,27 @@ apiV1.post('/optimization/jobs', async (req, res) => {
   }
 });
 
-apiV1.get('/optimization/jobs/:id', (req, res) => {
-  const job = optimizationJobs.get(req.params.id);
-  if (!job) {
-    return res.status(404).json({ success: false, error: 'Optimization job not found' });
+apiV1.get('/optimization/jobs/:id', verifySupabaseToken, async (req, res) => {
+  try {
+    const record = await getOptimizationJobDb(req.params.id as string);
+    if (!record) {
+      return res.status(404).json({ success: false, error: 'Optimization job not found' });
+    }
+    const result = record.resultJson ? JSON.parse(record.resultJson) : undefined;
+    res.json({
+      success: true,
+      id: record.id,
+      status: record.status,
+      result,
+      error: record.error,
+      progress: record.progress,
+      stage: record.stage,
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message || 'Failed to load job' });
   }
-  res.json({ success: true, id: job.id, status: job.status, result: job.result, error: job.error });
 });
 
-// Lightweight endpoint a cron/UptimeRobot can hit to keep the ML engine warm.
 apiV1.get('/warmup', async (req, res) => {
   try {
     const r = await axios.get(`${ML_ENGINE_URL}/warmup`, { timeout: 5000 });
@@ -572,14 +694,14 @@ apiV1.get('/warmup', async (req, res) => {
   }
 });
 
-apiV1.get('/optimization/:id/results', (req, res) => {
-  const record = optimizationData.get(req.params.id);
+apiV1.get('/optimization/:id/results', verifySupabaseToken, (req, res) => {
+  const record = optimizationData.get(req.params.id as string);
   if (!record) return res.status(404).json({ success: false, error: 'Optimization not found' });
   res.json({ success: true, ...record });
 });
 
-apiV1.get('/optimization/:id/report', (req, res) => {
-  const record = optimizationData.get(req.params.id);
+apiV1.get('/optimization/:id/report', verifySupabaseToken, (req, res) => {
+  const record = optimizationData.get(req.params.id as string);
   if (!record) return res.status(404).json({ success: false, error: 'Optimization not found' });
   res.json({ success: true, id: record.id, generated_at: new Date().toISOString(), report: record.result });
 });
@@ -587,105 +709,21 @@ apiV1.get('/optimization/:id/report', (req, res) => {
 // --------------------------------------------------
 // AI Goal Parsing (proxied to ML Engine)
 // --------------------------------------------------
-apiV1.post('/parse-goal', async (req, res) => {
+apiV1.post('/parse-goal', verifySupabaseToken, rateLimit, async (req, res) => {
   try {
-    const response = await axios.post(`${ML_ENGINE_URL}/parse-goal`, req.body);
-      res.json(response.data);
-    } catch (error: any) {
-      res.status(500).json({
-        success: false,
-        error: error.response?.data?.detail || error.message || 'Goal parsing failed',
-      });
-    }
+    const response = await axios.post(`${ML_ENGINE_URL}/parse-goal`, req.body, {
+      headers: mlEngineHeaders(),
+    });
+    res.json(response.data);
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      error: error.response?.data?.detail || error.message || 'Goal parsing failed',
+    });
+  }
 });
-
-// Removed legacy QC routes (now handled by frontend/lib/qc-compute.ts)
 
 app.use('/api/v1', apiV1);
-
-// ==================================================
-// LEGACY ROUTES (kept for backward compatibility)
-// ==================================================
-app.post('/upload', upload.single('dataset'), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
-
-    const results: any[] = [];
-    fs.createReadStream(req.file.path)
-      .pipe(csv())
-      .on('data', (data) => results.push(data))
-      .on('end', () => {
-        const totalRows = results.length;
-        const totalColumns = Object.keys(results[0]).length;
-        let missingValues = 0;
-        const numericColumns: string[] = [];
-        const categoricalColumns: string[] = [];
-
-        Object.entries(results[0]).forEach(([key, value]) => {
-          if (!isNaN(Number(value))) numericColumns.push(key);
-          else categoricalColumns.push(key);
-        });
-
-        results.forEach((row) => {
-          Object.values(row).forEach((value) => {
-            if (value === null || value === undefined || value === '') missingValues++;
-          });
-        });
-
-        dashboardData.totalDatasets += 1;
-        dashboardData.uploadedDatasets.push(req.file!.filename);
-        dashboardData.recentActivity.unshift({
-          title: `Dataset Uploaded: ${req.file!.originalname}`,
-          time: 'Just now',
-        });
-
-        res.json({
-          message: 'CSV uploaded successfully',
-          filename: req.file!.filename,
-          preview: results.slice(0, 5),
-          analytics: { totalRows, totalColumns, missingValues, numericColumns, categoricalColumns },
-        });
-      });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'CSV processing failed' });
-  }
-});
-
-app.post('/train', async (req, res) => {
-  try {
-    const { filename, target_column, algorithm } = req.body;
-    const response = await axios.post(`${ML_ENGINE_URL}/train`, { filename, target_column, algorithm });
-    const modelData = response.data;
-
-    dashboardData.latestTrainingResult = modelData;
-    dashboardData.activeModels += 1;
-    dashboardData.averageAccuracy = modelData.accuracy;
-    dashboardData.predictionsToday += modelData.testing_samples;
-    dashboardData.modelAccuracy.push({ model: modelData.model_type, accuracy: modelData.accuracy });
-    dashboardData.modelResults.push({
-      model: modelData.model_type,
-      accuracy: modelData.accuracy,
-      mae: modelData.metrics.mae,
-      rmse: modelData.metrics.rmse,
-      r2: modelData.metrics.r2_score,
-    });
-    dashboardData.recentActivity.unshift({ title: `${modelData.model_type} Model Trained`, time: 'Just now' });
-
-    res.json(modelData);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Training failed' });
-  }
-});
-
-app.get('/dashboard', (req, res) => {
-  res.json(dashboardData);
-});
-
-app.get('/results', (req, res) => {
-  res.json({ latestResult: dashboardData.latestTrainingResult });
-});
 
 // ==================================================
 // SERVER

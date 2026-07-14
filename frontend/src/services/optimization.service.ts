@@ -1,9 +1,7 @@
-import axios from "axios";
-
-const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001").trim();
+import { apiClient } from '@/utils/api';
 
 export const parseGoal = async (goal_text: string, template_id: string, columns: string[]) => {
-  const response = await axios.post(`${API_URL}/api/v1/parse-goal`, {
+  const response = await apiClient.post('/api/v1/parse-goal', {
     goal_text,
     template_id,
     columns,
@@ -18,11 +16,10 @@ export const runOptimization = async (payload: {
   monthly_volume?: number;
   unit_value?: number;
 }) => {
-  const response = await axios.post(`${API_URL}/api/v1/optimization/run`, payload);
+  const response = await apiClient.post('/api/v1/optimization/run', payload);
   return response.data;
 };
 
-// Async job pattern: start a job (returns immediately) and poll for status.
 export const createOptimizationJob = async (payload: {
   filename: string;
   template_id?: string;
@@ -30,21 +27,21 @@ export const createOptimizationJob = async (payload: {
   monthly_volume?: number;
   unit_value?: number;
 }) => {
-  const response = await axios.post(`${API_URL}/api/v1/optimization/jobs`, payload);
+  const response = await apiClient.post('/api/v1/optimization/jobs', payload);
   return response.data;
 };
 
 export const getOptimizationJob = async (jobId: string) => {
-  const response = await axios.get(`${API_URL}/api/v1/optimization/jobs/${jobId}`);
+  const response = await apiClient.get(`/api/v1/optimization/jobs/${jobId}`);
   return response.data;
 };
 
 export const getOptimizationResults = async (id: string) => {
-  const response = await axios.get(`${API_URL}/api/v1/optimization/${id}/results`);
+  const response = await apiClient.get(`/api/v1/optimization/${id}/results`);
   return response.data;
 };
 
 export const getOptimizationReport = async (id: string) => {
-  const response = await axios.get(`${API_URL}/api/v1/optimization/${id}/report`);
+  const response = await apiClient.get(`/api/v1/optimization/${id}/report`);
   return response.data;
 };

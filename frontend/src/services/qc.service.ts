@@ -1,12 +1,9 @@
 import axios from "axios";
 
 const API_URL = (
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001"
 ).trim();
 
-// ─────────────────────────────────────────────
-// Quality Data Summary
-// ─────────────────────────────────────────────
 export const runQcSummary = async (payload: {
   rows: Record<string, unknown>[];
   measurement_column: string;
@@ -16,9 +13,6 @@ export const runQcSummary = async (payload: {
   return response.data;
 };
 
-// ─────────────────────────────────────────────
-// Control Chart
-// ─────────────────────────────────────────────
 export const runControlChart = async (payload: {
   chart_type: "imr" | "xbar_r" | "p";
   measurements?: number[];
@@ -35,25 +29,16 @@ export const runControlChart = async (payload: {
   return response.data;
 };
 
-// ─────────────────────────────────────────────
-// Process Capability
-// ─────────────────────────────────────────────
 export const runCapabilityStudy = async (payload: {
   measurements: number[];
   lsl: number;
   usl: number;
   target?: number;
 }) => {
-  const response = await axios.post(
-    `${API_URL}/api/v1/qc/capability`,
-    payload
-  );
+  const response = await axios.post(`${API_URL}/api/v1/qc/capability`, payload);
   return response.data;
 };
 
-// ─────────────────────────────────────────────
-// Acceptance Sampling
-// ─────────────────────────────────────────────
 export const runAcceptanceSampling = async (payload: {
   lot_size: number;
   aql: number;

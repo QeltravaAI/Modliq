@@ -1,3 +1,49 @@
+// ---------------------------------------------------------------------------
+// DatasetHealthReport — shape returned by POST /api/v1/datasets/:id/health
+// ---------------------------------------------------------------------------
+export interface HealthWarning {
+  severity: "low" | "medium" | "high";
+  code: string;
+  message: string;
+  affectedColumns: string[];
+}
+
+export interface DatasetHealthReport {
+  success: boolean;
+  score: number;
+  status: "excellent" | "good" | "needs_review" | "risky" | "not_recommended";
+  mode: "generic" | "target-aware";
+  targetColumn: string | null;
+  generatedAt: string;
+  sampled: boolean;
+  rowsAnalyzed: number;
+  totalRows: number;
+  summary: {
+    rows: number;
+    columns: number;
+    numericColumns: number;
+    categoricalColumns: number;
+    missingValues: number;
+    duplicateRows: number;
+    constantColumns: string[];
+    suspiciousIdColumns: string[];
+    highCorrelationPairs: string[][];
+    outlierColumns: { column: string; method: string; count: number; percentage: number }[];
+  };
+  suggestedTarget: string | null;
+  warnings: HealthWarning[];
+  suggestions: string[];
+  targetAnalysis: {
+    targetColumn: string;
+    missingValues: number;
+    uniqueValues: number;
+    variance: number | null;
+    outlierCount: number;
+    isUsableTarget: boolean;
+    warnings: string[];
+  } | null;
+}
+
 export interface IntentState {
   raw_text: string;
   template_id: string;
@@ -54,10 +100,12 @@ export interface OptimizationResult {
 interface PipelineStore {
   filename: string | null;
   analytics: any;
+  healthReport: DatasetHealthReport | null;
   intent: IntentState | null;
   optimizationId: string | null;
   result: OptimizationResult | null;
   setDataset: (filename: string, analytics: any, skipSync?: boolean) => void;
+  setHealthReport: (report: DatasetHealthReport, skipSync?: boolean) => void;
   setIntent: (intent: IntentState, skipSync?: boolean) => void;
   setOptimization: (id: string, result: OptimizationResult, skipSync?: boolean) => void;
   hydrateWorkspace: (data: any) => void;
@@ -69,9 +117,11 @@ import { create } from "zustand";
 export const usePipelineStore = create<PipelineStore>((set) => ({
   filename: null,
   analytics: null,
+  healthReport: null,
   intent: null,
   optimizationId: null,
   result: null,
+
   setDataset: (filename, analytics, skipSync = false) => {
     set({ filename, analytics });
     if (!skipSync) {
@@ -82,6 +132,18 @@ export const usePipelineStore = create<PipelineStore>((set) => ({
       }).catch(console.error);
     }
   },
+
+  setHealthReport: (report, skipSync = false) => {
+    set({ healthReport: report });
+    if (!skipSync) {
+      fetch('/api/user/workspace', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ healthReport: report }),
+      }).catch(console.error);
+    }
+  },
+
   setIntent: (intent, skipSync = false) => {
     set({ intent });
     if (!skipSync) {
@@ -92,6 +154,7 @@ export const usePipelineStore = create<PipelineStore>((set) => ({
       }).catch(console.error);
     }
   },
+
   setOptimization: (optimizationId, result, skipSync = false) => {
     set({ optimizationId, result });
     if (!skipSync) {
@@ -102,19 +165,23 @@ export const usePipelineStore = create<PipelineStore>((set) => ({
       }).catch(console.error);
     }
   },
+
   hydrateWorkspace: (data) => {
     set({
       filename: data.activeDatasetId || null,
       analytics: data.datasetAnalytics || null,
+      healthReport: data.healthReport || null,
       intent: data.parsedIntent || null,
       optimizationId: data.activeOptimizationJobId || null,
       result: data.latestOptimizationResult || null,
     });
   },
+
   reset: () =>
     set({
       filename: null,
       analytics: null,
+      healthReport: null,
       intent: null,
       optimizationId: null,
       result: null,

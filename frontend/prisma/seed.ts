@@ -14,6 +14,7 @@ async function main() {
   if (!existingUser) {
     await prisma.user.create({
       data: {
+        id: 'demo-user-' + Date.now(),
         name: 'Demo User',
         email: demoEmail,
         password: hashedPassword,

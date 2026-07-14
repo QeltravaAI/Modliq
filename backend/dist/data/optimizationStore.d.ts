@@ -1,5 +1,5 @@
 export declare const optimizationData: {
-    save: (id: string, data: any) => void;
+    save: (id: string, data: any) => any;
     get: (id: string) => any;
     list: () => any[];
 };

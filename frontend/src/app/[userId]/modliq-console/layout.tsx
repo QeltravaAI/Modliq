@@ -11,12 +11,16 @@ import {
   BarChart2, 
   Microscope,
   LogOut,
-  User as UserIcon
+  User as UserIcon,
+  Truck,
+  Factory,
+  Zap
 } from 'lucide-react';
 import React, { use, useEffect, useState } from 'react';
 import Image from 'next/image';
 import { createClient } from '@/utils/supabase/client';
 import { usePipelineStore } from '@/store/pipelineStore';
+import AiCopilotDrawer from '@/components/ai/AiCopilotDrawer';
 
 export default function ConsoleLayout({
   children,
@@ -71,6 +75,9 @@ export default function ConsoleLayout({
     { name: 'Optimization', href: `/${resolvedParams.userId}/modliq-console/optimization-progress`, icon: Activity },
     { name: 'Results', href: `/${resolvedParams.userId}/modliq-console/results`, icon: BarChart2 },
     { name: 'Quality Studio', href: `/${resolvedParams.userId}/modliq-console/studio/quality`, icon: Microscope },
+    { name: 'Supply Chain', href: `/${resolvedParams.userId}/modliq-console/supply-chain`, icon: Truck },
+    { name: 'Operations', href: `/${resolvedParams.userId}/modliq-console/operations`, icon: Factory },
+    { name: 'Lean', href: `/${resolvedParams.userId}/modliq-console/lean`, icon: Zap },
   ];
 
   return (
@@ -140,6 +147,9 @@ export default function ConsoleLayout({
       <main className="flex-1 ml-64 min-h-screen">
         {children}
       </main>
+
+      {/* Global Floating AI Copilot Chatbot */}
+      <AiCopilotDrawer />
     </div>
   );
 }

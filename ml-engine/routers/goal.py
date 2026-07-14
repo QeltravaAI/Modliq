@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from services.goal_parser import parse_goal, GoalParseError, EXAMPLE_GOALS
+from dependencies import verify_service_key
 
 
 router = APIRouter()
@@ -12,7 +13,7 @@ class GoalRequest(BaseModel):
     columns: list[str] = []
 
 
-@router.post("/parse-goal")
+@router.post("/parse-goal", dependencies=[Depends(verify_service_key)])
 async def parse_goal_endpoint(request: GoalRequest):
     try:
         result = await parse_goal(request.goal_text, request.template_id, request.columns)

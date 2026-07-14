@@ -1,24 +1,35 @@
-import axios from "axios";
+import { apiClient } from '@/utils/api';
 
-const API_URL = (
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
-).trim();
+export interface HealthCheckPayload {
+  targetColumn?: string | null;
+  features?: string[] | null;
+  mode: 'generic' | 'target-aware';
+}
+
+export const getDatasetHealth = async (
+  datasetId: string,
+  payload: HealthCheckPayload
+) => {
+  const response = await apiClient.post(
+    `/api/v1/datasets/${datasetId}/health`,
+    payload
+  );
+  return response.data;
+};
 
 export const uploadDataset = async (
   file: File
 ) => {
-
   const formData = new FormData();
+  formData.append('dataset', file);
 
-  formData.append("dataset", file);
-
-  const response = await axios.post(
-    `${API_URL}/upload`,
+  const response = await apiClient.post(
+    '/api/v1/datasets/upload',
     formData,
     {
       headers: {
-        "Content-Type":
-          "multipart/form-data",
+        'Content-Type':
+          'multipart/form-data',
       },
     }
   );

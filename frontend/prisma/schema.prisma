@@ -3,12 +3,12 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
 model User {
-  id            String    @id @default(cuid())
+  id            String    @id
   name          String?
   email         String?   @unique
   emailVerified DateTime?
@@ -24,8 +24,27 @@ model User {
   parsedIntent             String?
   activeOptimizationJobId  String?
   latestOptimizationResult String?
+  healthReport             Json?   
   updatedAt                DateTime @updatedAt @default(now())
 }
+
+// ==========================================
+// Optimization Job Persistence
+// ==========================================
+model OptimizationJob {
+  id          String   @id
+  userId      String
+  datasetId   String?
+  status      String   @default("running")
+  stage       String?
+  progress    Int      @default(0)
+  requestJson String?
+  resultJson  String?
+  error       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
 
 model Account {
   id                 String  @id @default(cuid())
@@ -60,4 +79,137 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+// ==========================================
+// Operations Management Models
+// ==========================================
+model OperationsRecord {
+  id                    String   @id @default(cuid())
+  userId                String
+  datasetId             String?
+  batchId               String?
+  line                  String?
+  machine               String?
+  shift                 String?
+  product               String?
+  plannedTimeMinutes    Float?
+  runtimeMinutes        Float?
+  downtimeMinutes       Float?
+  downtimeReason        String?
+  idealCycleTimeSeconds Float?
+  totalCount            Int?
+  goodCount             Int?
+  rejectCount           Int?
+  yieldValue            Float?
+  scrapRate             Float?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+// ==========================================
+// Supply Chain Models
+// ==========================================
+model Supplier {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  category  String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model MaterialLot {
+  id              String   @id @default(cuid())
+  userId          String
+  supplierName    String?
+  lotCode         String
+  materialType    String?
+  receivedDate    DateTime?
+  incomingStatus  String?
+  defectRate      Float?
+  linkedBatchId   String?
+  linkedYield     Float?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ==========================================
+// Lean Manufacturing Models
+// ==========================================
+model LeanWasteEvent {
+  id            String   @id @default(cuid())
+  userId                String
+  wasteType     String
+  location      String?
+  description   String
+  estimatedLoss Float?
+  owner         String?
+  status        String   @default("Open")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model KaizenAction {
+  id              String   @id @default(cuid())
+  userId                String
+  title           String
+  problem         String?
+  rootCause       String?
+  countermeasure  String?
+  owner           String?
+  priority        String   @default("Medium")
+  status          String   @default("Backlog")
+  dueDate         DateTime?
+  impactArea      String?
+  linkedDatasetId String?
+  linkedBatchId   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model FiveSAudit {
+  id          String   @id @default(cuid())
+  userId                String
+  area        String?
+  sort        Int
+  setInOrder  Int
+  shine       Int
+  standardize Int
+  sustain     Int
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ==========================================
+// AI Persistence Models
+// ==========================================
+model AiInsight {
+  id        String   @id @default(cuid())
+  userId    String
+  module    String
+  title     String
+  summary   String
+  payload   String   // JSON string
+  createdAt DateTime @default(now())
+}
+
+model AiConversation {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AiMessage {
+  id             String   @id @default(cuid())
+  userId         String
+  conversationId String
+  role           String
+  content        String
+  createdAt      DateTime @default(now())
 }

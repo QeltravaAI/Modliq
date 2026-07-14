@@ -1,8 +1,11 @@
 'use client';
 
 import React, { useState, useEffect, use } from 'react';
-import { Microscope, Loader2, AlertCircle, BarChart3, Activity, Gauge, CheckCircle2, XCircle } from 'lucide-react';
+import { Microscope, Loader2, AlertCircle, BarChart3, Activity, Gauge, CheckCircle2, XCircle, Sparkles } from 'lucide-react';
 import { usePipelineStore } from '@/store/pipelineStore';
+import axios from 'axios';
+import { authenticatedFetch } from '@/utils/api';
+import AiInsightCard from '@/components/ai/AiInsightCard';
 import {
   computeSummary,
   computeIMRChart,
@@ -99,7 +102,7 @@ export default function QualityStudioPage({ params }: { params: Promise<{ userId
     setLoadError(null);
     setRows(null);
     setColumn('');
-    fetch(`${API_URL}/api/v1/datasets/${datasetId}/preview?rows=300`)
+    authenticatedFetch(`/api/v1/datasets/${datasetId}/preview?rows=300`)
       .then((r) => r.json())
       .then((data) => {
         if (!data.success && data.error) throw new Error(data.error);
@@ -226,8 +229,114 @@ export default function QualityStudioPage({ params }: { params: Promise<{ userId
                 <ControlChart title="Individuals (I) Chart" chart={imr.individuals_chart} />
                 <ControlChart title="Moving Range (MR) Chart" chart={imr.moving_range_chart} />
               </div>
-              <div className="mt-3 text-sm text-slate-600 bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-                {imr.stability.summary}
+              <div className="mt-3 text-sm text-slate-600 bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <span>{imr.stability.summary}</span>
+                
+                {/* AI CAPA Generator Trigger */}
+                {(() => {
+                  const [showCapa, setShowCapa] = React.useState(false);
+                  const [capaLoading, setCapaLoading] = React.useState(false);
+                  const [capaContent, setCapaContent] = React.useState<any>(null);
+                  const [capaError, setCapaError] = React.useState<string | null>(null);
+
+                  const fetchCapa = async () => {
+                    setShowCapa(true);
+                    if (capaContent) return;
+                    setCapaLoading(true);
+                    setCapaError(null);
+                    try {
+                      const res = await axios.post('/api/ai/capa', {
+                        problemStatement: `Out of control violation on variable: ${column}. Stability warning: ${imr.stability.summary}`,
+                        evidence: {
+                          mean: summary?.mean,
+                          stability: imr.stability.summary
+                        }
+                      });
+                      if (res.data.code === 'AI_NOT_CONFIGURED') {
+                        setCapaError('AI features require an API key to be configured. Calculated quality metrics remain fully active.');
+                      } else {
+                        setCapaContent(res.data);
+                      }
+                    } catch (e) {
+                      console.error(e);
+                      setCapaError('Failed to generate CAPA plan.');
+                    } finally {
+                      setCapaLoading(false);
+                    }
+                  };
+
+                  return (
+                    <div>
+                      <button
+                        onClick={fetchCapa}
+                        className="text-xs font-semibold text-[#2B70AB] hover:text-[#1B2A4A] bg-white border border-[#D0E2F0] hover:border-[#2B70AB] px-3 py-1.5 rounded-xl transition-all shadow-sm flex items-center gap-1.5"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
+                        Generate AI CAPA
+                      </button>
+
+                      {showCapa && (
+                        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                          <div className="bg-white rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl relative flex flex-col max-h-[85vh]">
+                            <div className="px-6 py-4 border-b border-[#D0E2F0] bg-slate-50 flex items-center justify-between">
+                              <h3 className="font-bold text-[#1B2A4A] text-sm">Corrective Action Preventive Action (CAPA) Plan</h3>
+                              <button 
+                                onClick={() => setShowCapa(false)}
+                                 className="text-slate-500 hover:text-slate-700 font-bold text-sm"
+                              >
+                                Close [X]
+                              </button>
+                            </div>
+                            <div className="p-6 overflow-y-auto flex-1 space-y-4">
+                              {capaLoading ? (
+                                <div className="flex flex-col items-center justify-center p-8 text-slate-500">
+                                  <Loader2 className="w-6 h-6 animate-spin text-[#2B70AB] mb-2" />
+                                  <span>Generating CAPA framework details...</span>
+                                </div>
+                              ) : capaError ? (
+                                 <p className="text-xs text-amber-700 bg-amber-50 p-4 border rounded-xl">{capaError}</p>
+                              ) : (
+                                <>
+                                  <div>
+                                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Problem Statement</h4>
+                                    <p className="text-sm font-semibold text-slate-800">{capaContent?.problemStatement}</p>
+                                  </div>
+                                  <div>
+                                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Containment Actions</h4>
+                                    <ul className="list-disc pl-4 text-xs text-slate-600 space-y-1">
+                                      {capaContent?.containment?.map((a: string, i: number) => <li key={i}>{a}</li>)}
+                                    </ul>
+                                  </div>
+                                  <div>
+                                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Root Cause Hypotheses</h4>
+                                    <ul className="list-disc pl-4 text-xs text-slate-600 space-y-1">
+                                      {capaContent?.rootCauseHypotheses?.map((a: string, i: number) => <li key={i}>{a}</li>)}
+                                    </ul>
+                                  </div>
+                                  <div>
+                                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Corrective Actions</h4>
+                                    <ul className="list-disc pl-4 text-xs text-slate-600 space-y-1">
+                                      {capaContent?.correctiveActions?.map((a: string, i: number) => <li key={i}>{a}</li>)}
+                                    </ul>
+                                  </div>
+                                  <div>
+                                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">Preventive Actions</h4>
+                                    <ul className="list-disc pl-4 text-xs text-slate-600 space-y-1">
+                                      {capaContent?.preventiveActions?.map((a: string, i: number) => <li key={i}>{a}</li>)}
+                                    </ul>
+                                  </div>
+                                  <div className="text-[10px] text-slate-400 italic pt-3 border-t">
+                                    AI-generated recommendation. Validate before production use.
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -311,6 +420,9 @@ export default function QualityStudioPage({ params }: { params: Promise<{ userId
               </div>
             )}
           </div>
+
+          {/* AI Quality Studio Card */}
+          <AiInsightCard module="quality" />
         </>
       )}
     </div>

@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const API_URL = (
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001"
 ).trim();
 
 export const getDashboardStats =
@@ -13,4 +13,4 @@ export const getDashboardStats =
       );
 
     return response.data;
-};
+  };

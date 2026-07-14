@@ -43,6 +43,7 @@ export async function GET(request: Request) {
       parsedIntent: user.parsedIntent ? JSON.parse(user.parsedIntent) : null,
       activeOptimizationJobId: user.activeOptimizationJobId,
       latestOptimizationResult: user.latestOptimizationResult ? JSON.parse(user.latestOptimizationResult) : null,
+      healthReport: (user as any).healthReport ? JSON.parse((user as any).healthReport) : null,
     });
   } catch (error) {
     console.error('Error fetching workspace:', error);
@@ -75,10 +76,11 @@ export async function PATCH(request: Request) {
       'datasetPreview',
       'parsedIntent',
       'activeOptimizationJobId',
-      'latestOptimizationResult'
+      'latestOptimizationResult',
+      'healthReport',
     ];
 
-    const jsonFields = ['datasetAnalytics', 'datasetPreview', 'parsedIntent', 'latestOptimizationResult'];
+    const jsonFields = ['datasetAnalytics', 'datasetPreview', 'parsedIntent', 'latestOptimizationResult', 'healthReport'];
 
     for (const field of allowedFields) {
       if (body[field] !== undefined) {
