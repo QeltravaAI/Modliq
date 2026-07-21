@@ -5,6 +5,8 @@ import axios from 'axios';
 import { Factory, Calculator, BarChart3, AlertTriangle, ShieldCheck, HelpCircle, Loader2 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from 'recharts';
 import AiInsightCard from '@/components/ai/AiInsightCard';
+import { isExtendedModulesEnabled } from '@/lib/feature-flags';
+import GatedModule from '@/components/GatedModule';
 
 const COLORS = ['#2B70AB', '#1B2A4A', '#E28743', '#76B5C5', '#873E23', '#1F3F49'];
 
@@ -34,6 +36,10 @@ export default function OperationsPage({ params }: { params: Promise<{ userId: s
   const [totalCount, setTotalCount] = useState('1000');
   const [goodCount, setGoodCount] = useState('980');
   const [formLoading, setFormLoading] = useState(false);
+
+  if (!isExtendedModulesEnabled()) {
+    return <GatedModule title="Operations" description="Track OEE, downtime Pareto, and identify operational bottlenecks." />;
+  }
 
   useEffect(() => {
     async function loadData() {

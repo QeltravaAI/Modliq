@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { createClient } from '@/utils/supabase/server';
+import { verifyJwt } from '@/lib/auth';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
@@ -8,14 +8,16 @@ const prisma = new PrismaClient();
 export async function GET(request: Request) {
   try {
     const cookieStore = await cookies();
-    const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (!session || !session.user?.id) {
+    const token = cookieStore.get('modliq_token')?.value;
+    if (!token) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const payload = verifyJwt(token);
+    if (!payload) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const userId = session.user.id;
+    const userId = payload.userId;
 
     const wasteEvents = await prisma.leanWasteEvent.findMany({ where: { userId } });
     const kaizenActions = await prisma.kaizenAction.findMany({ where: { userId } });

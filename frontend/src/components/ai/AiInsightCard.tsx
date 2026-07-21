@@ -5,7 +5,7 @@ import AiLoadingState from './AiLoadingState';
 import AiActionPanel from './AiActionPanel';
 
 interface Props {
-  module: 'dashboard' | 'dataset-health' | 'optimization' | 'quality' | 'supply-chain' | 'operations' | 'lean';
+  module: 'dashboard' | 'dataset-health' | 'optimization' | 'quality' | 'supply-chain' | 'operations' | 'lean' | 'goal';
   rawGoal?: string;
   triggerRefresh?: any;
 }

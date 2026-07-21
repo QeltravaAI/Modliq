@@ -9,17 +9,6 @@ export const parseGoal = async (goal_text: string, template_id: string, columns:
   return response.data;
 };
 
-export const runOptimization = async (payload: {
-  filename: string;
-  template_id?: string;
-  intent: any;
-  monthly_volume?: number;
-  unit_value?: number;
-}) => {
-  const response = await apiClient.post('/api/v1/optimization/run', payload);
-  return response.data;
-};
-
 export const createOptimizationJob = async (payload: {
   filename: string;
   template_id?: string;

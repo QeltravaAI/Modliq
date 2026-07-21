@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import AiInsightCard from '@/components/ai/AiInsightCard';
+import { isExtendedModulesEnabled } from '@/lib/feature-flags';
 
 // ---------------------------------------------------------------------------
 // Health score helpers
@@ -43,38 +44,42 @@ export default function DashboardPage() {
   const [scRisk, setScRisk] = useState<string | null>(null);
   const [leanKaizens, setLeanKaizens] = useState<number | null>(null);
 
+  const extendedEnabled = isExtendedModulesEnabled();
+
   useEffect(() => {
     if (!filename) return;
 
-    // Load OEE summary
-    axios.get('/api/operations/summary')
-      .then(res => {
-        if (res.data?.summary) {
-          setOpsOee(`${res.data.summary.oee}% (${res.data.summary.status})`);
-        }
-      })
-      .catch(console.error);
+    if (extendedEnabled) {
+      axios.get('/api/operations/summary')
+        .then(res => {
+          if (res.data?.summary) {
+            setOpsOee(`${res.data.summary.oee}% (${res.data.summary.status})`);
+          }
+        })
+        .catch(() => setOpsOee('N/A'));
 
-    // Load supply chain risk summary
-    axios.get('/api/supply-chain/summary')
-      .then(res => {
-        if (res.data?.summary?.scorecard?.length > 0) {
-          // Worst supplier risk
-          const worst = res.data.summary.scorecard[0];
-          setScRisk(`${worst.supplierName} (${worst.status})`);
-        }
-      })
-      .catch(console.error);
+      axios.get('/api/supply-chain/summary')
+        .then(res => {
+          if (res.data?.summary?.scorecard?.length > 0) {
+            const worst = res.data.summary.scorecard[0];
+            setScRisk(`${worst.supplierName} (${worst.status})`);
+          }
+        })
+        .catch(() => setScRisk('N/A'));
 
-    // Load lean kaizen summary
-    axios.get('/api/lean/summary')
-      .then(res => {
-        if (res.data?.summary) {
-          setLeanKaizens(res.data.summary.openKaizenCount);
-        }
-      })
-      .catch(console.error);
-  }, [filename]);
+      axios.get('/api/lean/summary')
+        .then(res => {
+          if (res.data?.summary) {
+            setLeanKaizens(res.data.summary.openKaizenCount);
+          }
+        })
+        .catch(() => setLeanKaizens(0));
+    } else {
+      setOpsOee(null);
+      setScRisk(null);
+      setLeanKaizens(null);
+    }
+  }, [filename, extendedEnabled]);
 
   if (!filename) {
     return (
@@ -200,7 +205,8 @@ export default function DashboardPage() {
       </div>
 
       {/* ---- Operations, Supply Chain, and Lean Summary Cards ---- */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {extendedEnabled && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Operations OEE */}
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between min-h-[130px]">
           <div className="flex items-center gap-2 text-slate-500">
@@ -246,6 +252,7 @@ export default function DashboardPage() {
           </Link>
         </div>
       </div>
+      )}
 
       {/* AI Executive Summary Card */}
       <AiInsightCard module="dashboard" />

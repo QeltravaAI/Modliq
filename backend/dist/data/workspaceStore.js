@@ -1,62 +1,45 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.workspaceStore = void 0;
-const fs_1 = __importDefault(require("fs"));
-const path_1 = __importDefault(require("path"));
-const isProduction = process.env.NODE_ENV === 'production';
-const STORE_DIR = isProduction ? '/tmp/modliq' : path_1.default.join(process.cwd(), 'uploads');
-const STORE_PATH = path_1.default.join(STORE_DIR, 'workspace-store.json');
-function ensureDir() {
+exports.setActiveDataset = exports.getWorkspace = void 0;
+const mongodb_1 = require("mongodb");
+const DATABASE_URL = process.env.DATABASE_URL || process.env.MONGODB_URI || '';
+const client = DATABASE_URL ? new mongodb_1.MongoClient(DATABASE_URL) : null;
+let db = null;
+async function connect() {
+    if (!client || !DATABASE_URL)
+        return null;
+    if (db)
+        return db;
     try {
-        if (!fs_1.default.existsSync(STORE_DIR)) {
-            fs_1.default.mkdirSync(STORE_DIR, { recursive: true });
-        }
+        await client.connect();
+        db = client.db('modliq');
+        return db;
     }
     catch (err) {
-        console.error('Failed to create workspace store directory:', err);
+        console.warn('[db] MongoDB connection failed, using in-memory fallback:', err?.message || err);
+        return null;
     }
 }
-function loadStore() {
-    try {
-        ensureDir();
-        if (fs_1.default.existsSync(STORE_PATH)) {
-            const raw = fs_1.default.readFileSync(STORE_PATH, 'utf-8');
-            return JSON.parse(raw);
-        }
+const memoryWorkspaces = new Map();
+async function getWorkspace(userId) {
+    const database = await connect();
+    if (database) {
+        const record = await database.collection('workspaces').findOne({ _id: userId });
+        if (!record)
+            return { activeDatasetId: null };
+        return { activeDatasetId: record.activeDatasetId };
     }
-    catch (err) {
-        console.error('Failed to load workspace store:', err);
-    }
-    return {};
+    return memoryWorkspaces.get(userId) || { activeDatasetId: null };
 }
-function saveStore() {
-    try {
-        ensureDir();
-        fs_1.default.writeFileSync(STORE_PATH, JSON.stringify(workspaces, null, 2));
+exports.getWorkspace = getWorkspace;
+async function setActiveDataset(userId, datasetId) {
+    const database = await connect();
+    if (database) {
+        await database.collection('workspaces').updateOne({ _id: userId }, { $set: { activeDatasetId: datasetId, updatedAt: new Date() } }, { upsert: true });
+        return { activeDatasetId: datasetId };
     }
-    catch (err) {
-        console.error('Failed to persist workspace store:', err);
-    }
+    memoryWorkspaces.set(userId, { activeDatasetId: datasetId });
+    return { activeDatasetId: datasetId };
 }
-const workspaces = loadStore();
-exports.workspaceStore = {
-    getWorkspace: (userId) => {
-        if (!workspaces[userId]) {
-            workspaces[userId] = { activeDatasetId: null };
-        }
-        return workspaces[userId];
-    },
-    setActiveDataset: (userId, datasetId) => {
-        if (!workspaces[userId]) {
-            workspaces[userId] = { activeDatasetId: null };
-        }
-        const workspace = workspaces[userId];
-        workspace.activeDatasetId = datasetId;
-        saveStore();
-        return workspace;
-    },
-};
+exports.setActiveDataset = setActiveDataset;
 //# sourceMappingURL=workspaceStore.js.map

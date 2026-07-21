@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:./dev.db
+      - ML_ENGINE_URL=http://ml-engine:8000
+      - CLIENT_ORIGIN=http://localhost:3000
+    volumes:
+      - ./backend/uploads:/app/uploads
+    depends_on:
+      - ml-engine
+    restart: unless-stopped
+
+  ml-engine:
+    build:
+      context: ./ml-engine
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./backend/uploads:/app/backend/uploads
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://localhost:3001
+    depends_on:
+      - backend
+    restart: unless-stopped

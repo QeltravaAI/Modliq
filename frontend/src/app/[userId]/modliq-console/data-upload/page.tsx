@@ -8,10 +8,9 @@ import {
 } from 'lucide-react';
 import { usePipelineStore, DatasetHealthReport } from '@/store/pipelineStore';
 import { getDatasetHealth } from '@/services/dataset.service';
+import AiInsightCard from '@/components/ai/AiInsightCard';
 import { useRouter } from 'next/navigation';
 import { authenticatedFetch } from '@/utils/api';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 interface DatasetMetadata {
   totalRows: number;
@@ -51,6 +50,8 @@ function getSeverityIcon(severity: string) {
 // Health panel component
 // ---------------------------------------------------------------------------
 function HealthPanel({ report, loading }: { report: DatasetHealthReport | null; loading: boolean }) {
+  const [showAi, setShowAi] = useState(false);
+
   if (loading) {
     return (
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mt-4">
@@ -160,26 +161,19 @@ function HealthPanel({ report, loading }: { report: DatasetHealthReport | null; 
       )}
 
       {/* AI Explainer Toggle */}
-      {(() => {
-        const [showAi, setShowAi] = React.useState(false);
-        const AiInsightCard = require('@/components/ai/AiInsightCard').default;
-
-        return (
-          <div className="mt-3 border-t border-white/60 pt-3">
-            <button
-              onClick={() => setShowAi(!showAi)}
-              className="w-full text-xs font-bold text-[#2B70AB] hover:text-[#1B2A4A] bg-white border rounded-xl py-2 px-3 transition-colors shadow-sm mb-3"
-            >
-              {showAi ? 'Hide AI Explanation' : 'Explain Health Score with AI'}
-            </button>
-            {showAi && (
-              <div className="mt-2 text-left">
-                <AiInsightCard module="dataset-health" />
-              </div>
-            )}
+      <div className="mt-3 border-t border-white/60 pt-3">
+        <button
+          onClick={() => setShowAi(!showAi)}
+          className="w-full text-xs font-bold text-[#2B70AB] hover:text-[#1B2A4A] bg-white border rounded-xl py-2 px-3 transition-colors shadow-sm mb-3"
+        >
+          {showAi ? 'Hide AI Explanation' : 'Explain Health Score with AI'}
+        </button>
+        {showAi && (
+          <div className="mt-2 text-left">
+            <AiInsightCard module="dataset-health" />
           </div>
-        );
-      })()}
+        )}
+      </div>
 
       {/* Disclaimer */}
       <p className="text-xs text-slate-400 leading-relaxed border-t border-white/60 pt-2">
@@ -216,7 +210,7 @@ export default function DataUploadPage({ params }: { params: Promise<{ userId: s
 
   const persistDatasetSelection = async (id: string) => {
     try {
-      await authenticatedFetch('/api/user/dataset', {
+      await fetch('/api/user/dataset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ datasetId: id }),

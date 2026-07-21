@@ -1,58 +1,53 @@
-import fs from 'fs';
-import path from 'path';
+import prisma from '@/lib/prisma';
 
-const isProduction = process.env.NODE_ENV === 'production';
-const STORE_DIR = isProduction ? '/tmp/modliq' : path.join(process.cwd(), 'uploads');
-const STORE_PATH = path.join(STORE_DIR, 'workspace-store.json');
-
-function ensureDir() {
-  try {
-    if (!fs.existsSync(STORE_DIR)) {
-      fs.mkdirSync(STORE_DIR, { recursive: true });
-    }
-  } catch (err) {
-    console.error('Failed to create workspace store directory:', err);
+export async function getWorkspace(userId: string) {
+  const workspace = await prisma.workspaceState.findUnique({
+    where: { userId },
+  });
+  if (!workspace) {
+    return { activeDatasetId: null, activeWorkflowId: null };
   }
+  return {
+    activeDatasetId: workspace.activeDatasetId,
+    activeWorkflowId: workspace.activeWorkflowId,
+  };
 }
 
-function loadStore() {
-  try {
-    ensureDir();
-    if (fs.existsSync(STORE_PATH)) {
-      const raw = fs.readFileSync(STORE_PATH, 'utf-8');
-      return JSON.parse(raw);
-    }
-  } catch (err) {
-    console.error('Failed to load workspace store:', err);
-  }
-  return {};
+export async function setActiveDataset(userId: string, datasetId: string) {
+  await prisma.workspaceState.upsert({
+    where: { userId },
+    update: {
+      activeDatasetId: datasetId,
+      updatedAt: new Date(),
+    },
+    create: {
+      userId,
+      activeDatasetId: datasetId,
+      updatedAt: new Date(),
+    },
+  });
+  return { activeDatasetId: datasetId };
 }
 
-function saveStore() {
-  try {
-    ensureDir();
-    fs.writeFileSync(STORE_PATH, JSON.stringify(workspaces, null, 2));
-  } catch (err) {
-    console.error('Failed to persist workspace store:', err);
-  }
+export async function setActiveWorkflow(userId: string, workflowId: string | null) {
+  await prisma.workspaceState.upsert({
+    where: { userId },
+    update: {
+      activeWorkflowId: workflowId,
+      updatedAt: new Date(),
+    },
+    create: {
+      userId,
+      activeWorkflowId: workflowId,
+      updatedAt: new Date(),
+    },
+  });
+  return { activeWorkflowId: workflowId };
 }
 
-const workspaces: Record<string, { activeDatasetId: string | null }> = loadStore();
-
-export const workspaceStore = {
-  getWorkspace: (userId: string) => {
-    if (!workspaces[userId]) {
-      workspaces[userId] = { activeDatasetId: null };
-    }
-    return workspaces[userId];
-  },
-  setActiveDataset: (userId: string, datasetId: string) => {
-    if (!workspaces[userId]) {
-      workspaces[userId] = { activeDatasetId: null };
-    }
-    const workspace = workspaces[userId]!;
-    workspace.activeDatasetId = datasetId;
-    saveStore();
-    return workspace;
-  },
-};
+export async function getActiveWorkflowId(userId: string): Promise<string | null> {
+  const workspace = await prisma.workspaceState.findUnique({
+    where: { userId },
+  });
+  return workspace?.activeWorkflowId || null;
+}

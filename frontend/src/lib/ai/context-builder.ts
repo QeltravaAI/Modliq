@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { isExtendedModulesEnabled } from '@/lib/feature-flags';
 
 const prisma = new PrismaClient();
 
@@ -60,6 +61,8 @@ export async function buildWorkspaceAIContext(userId: string): Promise<Workspace
       };
     }
 
+    const extendedModulesEnabled = isExtendedModulesEnabled();
+
     // 1. Dataset Preview & Analytics
     let datasetPreviewSummary = null;
     if (user.datasetPreview) {
@@ -70,7 +73,7 @@ export async function buildWorkspaceAIContext(userId: string): Promise<Workspace
         datasetPreviewSummary = {
           columns,
           rowCount: rows.length,
-          rows: rows.slice(0, 30) // Cap to max 30 rows for prompt length safety
+          rows: rows.slice(0, 30)
         };
       } catch (e) {
         console.error('Failed to parse datasetPreview:', e);
@@ -86,7 +89,7 @@ export async function buildWorkspaceAIContext(userId: string): Promise<Workspace
           score: report.score || 0,
           status: report.status || 'UNKNOWN',
           warningCount: (report.warnings || []).length,
-          warnings: (report.warnings || []).slice(0, 15).map((w: any) => typeof w === 'string' ? w : w.message) // Limit warnings count
+          warnings: (report.warnings || []).slice(0, 15).map((w: any) => typeof w === 'string' ? w : w.message)
         };
       } catch (e) {
         console.error('Failed to parse healthReport:', e);
@@ -109,77 +112,78 @@ export async function buildWorkspaceAIContext(userId: string): Promise<Workspace
     }
 
     // 4. Operations Summary
-    const opRecords = await prisma.operationsRecord.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' }
-    });
-
     let operations = null;
-    if (opRecords.length > 0) {
-      let oeeSum = 0;
-      let availSum = 0;
-      let perfSum = 0;
-      let qualSum = 0;
-      const downtimeMinutes: Record<string, number> = {};
-      const machineDowntime: Record<string, number> = {};
-
-      opRecords.forEach(r => {
-        // Availability
-        const avail = r.plannedTimeMinutes && r.runtimeMinutes ? Math.min(1, r.runtimeMinutes / r.plannedTimeMinutes) : 1;
-        // Performance
-        const perf = r.runtimeMinutes && r.idealCycleTimeSeconds && r.totalCount
-          ? Math.min(1, (r.idealCycleTimeSeconds * r.totalCount) / (r.runtimeMinutes * 60))
-          : 1;
-        // Quality
-        const qual = r.totalCount && r.goodCount ? Math.min(1, r.goodCount / r.totalCount) : 1;
-        const oee = avail * perf * qual;
-
-        oeeSum += oee;
-        availSum += avail;
-        perfSum += perf;
-        qualSum += qual;
-
-        if (r.downtimeReason && r.downtimeMinutes) {
-          downtimeMinutes[r.downtimeReason] = (downtimeMinutes[r.downtimeReason] || 0) + r.downtimeMinutes;
-        }
-        if (r.machine && r.downtimeMinutes) {
-          machineDowntime[r.machine] = (machineDowntime[r.machine] || 0) + r.downtimeMinutes;
-        }
+    if (extendedModulesEnabled) {
+      const opRecords = await prisma.operationsRecord.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' }
       });
 
-      // Find bottleneck machine
-      let bottleneckMachine = null;
-      let maxDowntime = 0;
-      Object.entries(machineDowntime).forEach(([m, d]) => {
-        if (d > maxDowntime) {
-          maxDowntime = d;
-          bottleneckMachine = m;
-        }
-      });
+      if (opRecords.length > 0) {
+        let oeeSum = 0;
+        let availSum = 0;
+        let perfSum = 0;
+        let qualSum = 0;
+        const downtimeMinutes: Record<string, number> = {};
+        const machineDowntime: Record<string, number> = {};
 
-      operations = {
-        recordsCount: opRecords.length,
-        avgOee: oeeSum / opRecords.length,
-        avgAvailability: availSum / opRecords.length,
-        avgPerformance: perfSum / opRecords.length,
-        avgQuality: qualSum / opRecords.length,
-        bottleneckMachine,
-        topDowntimeReasons: Object.keys(downtimeMinutes).sort((a, b) => downtimeMinutes[b] - downtimeMinutes[a]).slice(0, 5)
-      };
+        opRecords.forEach(r => {
+          const planned = r.plannedTimeMinutes || 480;
+          const downtime = r.downtimeMinutes || 0;
+          const runtime = Math.max(0, planned - downtime);
+          const total = r.totalCount || 1000;
+          const good = r.goodCount || Math.round(total * 0.95);
+          const idealCycle = r.idealCycleTimeSeconds || 30;
+
+          const avail = planned > 0 ? Math.min(1, runtime / planned) : 1;
+          const perf = runtime > 0 ? Math.min(1, (idealCycle * total) / (runtime * 60)) : 1;
+          const qual = total > 0 ? Math.min(1, good / total) : 1;
+          const oee = avail * perf * qual;
+
+          oeeSum += oee;
+          availSum += avail;
+          perfSum += perf;
+          qualSum += qual;
+
+          if (r.downtimeReason && downtime > 0) {
+            downtimeMinutes[r.downtimeReason] = (downtimeMinutes[r.downtimeReason] || 0) + downtime;
+          }
+          if (r.machine && downtime > 0) {
+            machineDowntime[r.machine] = (machineDowntime[r.machine] || 0) + downtime;
+          }
+        });
+
+        let bottleneckMachine = null;
+        let maxDowntime = 0;
+        Object.entries(machineDowntime).forEach(([m, d]) => {
+          if (d > maxDowntime) {
+            maxDowntime = d;
+            bottleneckMachine = m;
+          }
+        });
+
+        operations = {
+          recordsCount: opRecords.length,
+          avgOee: oeeSum / opRecords.length,
+          avgAvailability: availSum / opRecords.length,
+          avgPerformance: perfSum / opRecords.length,
+          avgQuality: qualSum / opRecords.length,
+          bottleneckMachine,
+          topDowntimeReasons: Object.keys(downtimeMinutes).sort((a, b) => downtimeMinutes[b] - downtimeMinutes[a]).slice(0, 5)
+        };
+      }
     }
 
     // 5. Supply Chain Summary
-    const lots = await prisma.materialLot.findMany({ where: { userId } });
-    const suppliers = await prisma.supplier.findMany({ where: { userId } });
-
     let supplyChain = null;
-    if (lots.length > 0 || suppliers.length > 0) {
+    if (extendedModulesEnabled) {
+      const lots = await prisma.materialLot.findMany({ where: { userId } });
+      const suppliers = await prisma.supplier.findMany({ where: { userId } });
       const underperformingLots = lots
         .filter(l => (l.defectRate && l.defectRate > 0.05) || (l.linkedYield && l.linkedYield < 85))
         .map(l => `${l.lotCode} (${l.supplierName || 'Unknown'})`)
         .slice(0, 10);
 
-      // Compute supplier risk metrics
       const supplierLots: Record<string, number> = {};
       const supplierDefectSum: Record<string, number> = {};
       lots.forEach(l => {
@@ -208,27 +212,30 @@ export async function buildWorkspaceAIContext(userId: string): Promise<Workspace
     }
 
     // 6. Lean Summary
-    const kaizenCount = await prisma.kaizenAction.count({
-      where: { userId, status: { not: 'Completed' } }
-    });
-    const wasteEvents = await prisma.leanWasteEvent.findMany({ where: { userId } });
-    const totalEstimatedLoss = wasteEvents.reduce((sum, w) => sum + (w.estimatedLoss || 0), 0);
+    let lean = null;
+    if (extendedModulesEnabled) {
+      const kaizenCount = await prisma.kaizenAction.count({
+        where: { userId, status: { not: 'Completed' } }
+      });
+      const wasteEvents = await prisma.leanWasteEvent.findMany({ where: { userId } });
+      const totalEstimatedLoss = wasteEvents.reduce((sum, w) => sum + (w.estimatedLoss || 0), 0);
 
-    const latestAudit = await prisma.fiveSAudit.findFirst({
-      where: { userId },
-      orderBy: { createdAt: 'desc' }
-    });
+      const latestAudit = await prisma.fiveSAudit.findFirst({
+        where: { userId },
+        orderBy: { createdAt: 'desc' }
+      });
 
-    let latestFiveSAuditScore = null;
-    if (latestAudit) {
-      latestFiveSAuditScore = (latestAudit.sort + latestAudit.setInOrder + latestAudit.shine + latestAudit.standardize + latestAudit.sustain) * 4; // Normalized to 100
+      let latestFiveSAuditScore = null;
+      if (latestAudit) {
+        latestFiveSAuditScore = (latestAudit.sort + latestAudit.setInOrder + latestAudit.shine + latestAudit.standardize + latestAudit.sustain) * 4;
+      }
+
+      lean = {
+        openKaizenCount: kaizenCount,
+        totalEstimatedLoss,
+        latestFiveSAuditScore
+      };
     }
-
-    const lean = {
-      openKaizenCount: kaizenCount,
-      totalEstimatedLoss,
-      latestFiveSAuditScore
-    };
 
     return {
       activeDatasetId: user.activeDatasetId,

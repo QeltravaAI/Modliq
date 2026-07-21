@@ -1,9 +1,7 @@
-export declare const workspaceStore: {
-    getWorkspace: (userId: string) => {
-        activeDatasetId: string | null;
-    };
-    setActiveDataset: (userId: string, datasetId: string) => {
-        activeDatasetId: string | null;
-    };
-};
+export declare function getWorkspace(userId: string): Promise<{
+    activeDatasetId: any;
+}>;
+export declare function setActiveDataset(userId: string, datasetId: string): Promise<{
+    activeDatasetId: string;
+}>;
 //# sourceMappingURL=workspaceStore.d.ts.map

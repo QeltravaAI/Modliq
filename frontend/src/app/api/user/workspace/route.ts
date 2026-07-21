@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { createClient } from '@/utils/supabase/server';
+import { verifyJwt } from '@/lib/auth';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
@@ -8,21 +8,23 @@ const prisma = new PrismaClient();
 export async function GET(request: Request) {
   try {
     const cookieStore = await cookies();
-    const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (!session || !session.user?.id) {
+    const token = cookieStore.get('modliq_token')?.value;
+    if (!token) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const payload = verifyJwt(token);
+    if (!payload) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const userId = session.user.id;
+    const userId = payload.userId;
     let user = await prisma.user.findUnique({
       where: { id: userId }
     });
 
-    if (!user && session.user.email) {
+    if (!user && payload.email) {
       user = await prisma.user.findUnique({
-        where: { email: session.user.email }
+        where: { email: payload.email }
       });
     }
 
@@ -30,7 +32,7 @@ export async function GET(request: Request) {
       user = await prisma.user.create({
         data: {
           id: userId,
-          email: session.user.email,
+          email: payload.email,
         }
       });
     }
@@ -57,14 +59,16 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const cookieStore = await cookies();
-    const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (!session || !session.user?.id) {
+    const token = cookieStore.get('modliq_token')?.value;
+    if (!token) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const payload = verifyJwt(token);
+    if (!payload) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const userId = session.user.id;
+    const userId = payload.userId;
     const body = await request.json();
 
     // Allowed fields to update
@@ -93,8 +97,8 @@ export async function PATCH(request: Request) {
     }
 
     let user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user && session.user.email) {
-      user = await prisma.user.findUnique({ where: { email: session.user.email } });
+    if (!user && payload.email) {
+      user = await prisma.user.findUnique({ where: { email: payload.email } });
     }
 
     if (user) {
@@ -106,7 +110,7 @@ export async function PATCH(request: Request) {
       user = await prisma.user.create({
         data: {
           id: userId,
-          email: session.user.email,
+          email: payload.email,
           ...updateData
         }
       });

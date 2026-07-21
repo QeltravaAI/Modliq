@@ -1,6 +1,9 @@
 import requests
 import os
 import sys
+from dotenv import load_dotenv
+
+load_dotenv()
 
 BASE = os.getenv('ML_BASE_URL', 'http://localhost:8000')
 SERVICE_KEY = os.getenv('ML_INTERNAL_API_KEY', 'test-key')
@@ -25,15 +28,15 @@ def check(name, method, path, expected_status=200, json=None):
 results = []
 
 # Public endpoints
-results.append(check('health', 'GET', '/health'))
+results.append(check('health', 'GET', '/'))
 results.append(check('warmup', 'GET', '/warmup'))
 
 # Protected endpoints with service key
-results.append(check('dataset-health', 'POST', '/dataset-health', 422, {
+results.append(check('dataset-health', 'POST', '/dataset-health', 200, {
     'rows': [{'temperature': 80, 'pressure': 450, 'yield': 95}],
     'mode': 'generic'
 }))
-results.append(check('parse-goal', 'POST', '/parse-goal', 422, {
+results.append(check('parse-goal', 'POST', '/parse-goal', 200, {
     'goal_text': 'maximize yield',
     'columns': ['yield', 'temperature']
 }))

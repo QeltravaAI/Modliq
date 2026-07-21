@@ -1,1 +1,1 @@
-{"version":3,"file":"optimizationStore.d.ts","sourceRoot":"","sources":["../../src/data/optimizationStore.ts"],"names":[],"mappings":"AAyCA,eAAO,MAAM,gBAAgB;eAChB,MAAM,QAAQ,GAAG;cAKlB,MAAM;;CAMjB,CAAC"}
+{"version":3,"file":"optimizationStore.d.ts","sourceRoot":"","sources":["../../src/data/optimizationStore.ts"],"names":[],"mappings":"AAsBA,wBAAsB,gBAAgB,CAAC,EAAE,EAAE,MAAM,EAAE,IAAI,EAAE,GAAG,gBAY3D;AAED,wBAAsB,eAAe,CAAC,EAAE,EAAE,MAAM,gBAO/C;AAED,wBAAsB,iBAAiB,iBAMtC"}

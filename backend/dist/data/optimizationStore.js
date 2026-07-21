@@ -1,58 +1,51 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.optimizationData = void 0;
-const fs_1 = __importDefault(require("fs"));
-const path_1 = __importDefault(require("path"));
-const isProduction = process.env.NODE_ENV === 'production';
-const STORE_DIR = isProduction ? '/tmp/modliq' : path_1.default.join(process.cwd(), 'uploads');
-const STORE_PATH = path_1.default.join(STORE_DIR, 'optimization-store.json');
-function ensureDir() {
+exports.listOptimizations = exports.getOptimization = exports.saveOptimization = void 0;
+const mongodb_1 = require("mongodb");
+const DATABASE_URL = process.env.DATABASE_URL || process.env.MONGODB_URI || '';
+const client = DATABASE_URL ? new mongodb_1.MongoClient(DATABASE_URL) : null;
+let db = null;
+async function connect() {
+    if (!client || !DATABASE_URL)
+        return null;
+    if (db)
+        return db;
     try {
-        if (!fs_1.default.existsSync(STORE_DIR)) {
-            fs_1.default.mkdirSync(STORE_DIR, { recursive: true });
-        }
+        await client.connect();
+        db = client.db('modliq');
+        return db;
     }
     catch (err) {
-        console.error('Failed to create optimization store directory:', err);
+        console.warn('[db] MongoDB connection failed, using in-memory fallback:', err?.message || err);
+        return null;
     }
 }
-function loadStore() {
-    try {
-        ensureDir();
-        if (fs_1.default.existsSync(STORE_PATH)) {
-            const raw = fs_1.default.readFileSync(STORE_PATH, 'utf-8');
-            return JSON.parse(raw);
-        }
+const memoryOptimizations = new Map();
+async function saveOptimization(id, data) {
+    const database = await connect();
+    if (database) {
+        await database.collection('optimizations').updateOne({ _id: id }, { $set: { ...data, status: 'completed', progress: 100, updatedAt: new Date() } }, { upsert: true });
+        return data;
     }
-    catch (err) {
-        console.error('Failed to load optimization store:', err);
-    }
-    return {};
+    memoryOptimizations.set(id, { _id: id, ...data, status: 'completed', progress: 100, updatedAt: new Date() });
+    return data;
 }
-function saveStore() {
-    try {
-        ensureDir();
-        fs_1.default.writeFileSync(STORE_PATH, JSON.stringify(store, null, 2));
+exports.saveOptimization = saveOptimization;
+async function getOptimization(id) {
+    const database = await connect();
+    if (database) {
+        const record = await database.collection('optimizations').findOne({ _id: id });
+        return record || null;
     }
-    catch (err) {
-        console.error('Failed to persist optimization store:', err);
-    }
+    return memoryOptimizations.get(id) || null;
 }
-const store = loadStore();
-exports.optimizationData = {
-    save: (id, data) => {
-        store[id] = data;
-        saveStore();
-        return store[id];
-    },
-    get: (id) => {
-        return store[id];
-    },
-    list: () => {
-        return Object.entries(store).map(([id, data]) => ({ id, ...data }));
-    },
-};
+exports.getOptimization = getOptimization;
+async function listOptimizations() {
+    const database = await connect();
+    if (database) {
+        return database.collection('optimizations').find({ status: 'completed' }).toArray();
+    }
+    return Array.from(memoryOptimizations.values()).filter((item) => item.status === 'completed');
+}
+exports.listOptimizations = listOptimizations;
 //# sourceMappingURL=optimizationStore.js.map

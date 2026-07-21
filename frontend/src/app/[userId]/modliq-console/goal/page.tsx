@@ -10,6 +10,7 @@ import { usePipelineStore } from '@/store/pipelineStore';
 import { parseGoal } from '@/services/optimization.service';
 import { getDatasetHealth } from '@/services/dataset.service';
 import { IntentState } from '@/store/pipelineStore';
+import AiInsightCard from '@/components/ai/AiInsightCard';
 
 export default function GoalPage({ params }: { params: Promise<{ userId: string }> }) {
   const resolvedParams = use(params);
@@ -23,6 +24,7 @@ export default function GoalPage({ params }: { params: Promise<{ userId: string 
   ];
 
   const [goalText, setGoalText] = useState('');
+  const [showCoach, setShowCoach] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
   const [examples, setExamples] = useState<string[]>([]);
@@ -178,40 +180,32 @@ export default function GoalPage({ params }: { params: Promise<{ userId: string 
             )}
           </button>
 
-          {/* AI Goal Coach Button */}
           {goalText.trim() && (
-            (() => {
-              const [showCoach, setShowCoach] = useState(false);
-              const AiInsightCard = require('@/components/ai/AiInsightCard').default;
-
-              return (
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setShowCoach(!showCoach)}
-                    className="px-4 py-2.5 border border-[#D0E2F0] hover:border-[#2B70AB] bg-white text-slate-700 rounded-lg text-sm font-medium shadow-sm transition-colors flex items-center gap-2"
-                  >
-                    <Sparkles className="w-4 h-4 text-amber-500 fill-amber-500" />
-                    {showCoach ? 'Hide Coach' : 'Improve Goal with AI'}
-                  </button>
-                  {showCoach && (
-                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                      <div className="bg-white rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl relative">
-                        <button 
-                          onClick={() => setShowCoach(false)}
-                           className="absolute top-4 right-4 text-slate-500 hover:text-slate-700 font-bold text-sm"
-                        >
-                          Close [X]
-                        </button>
-                        <div className="p-6">
-                          <AiInsightCard module="goal" rawGoal={goalText} />
-                        </div>
-                      </div>
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowCoach(!showCoach)}
+                className="px-4 py-2.5 border border-[#D0E2F0] hover:border-[#2B70AB] bg-white text-slate-700 rounded-lg text-sm font-medium shadow-sm transition-colors flex items-center gap-2"
+              >
+                <Sparkles className="w-4 h-4 text-amber-500 fill-amber-500" />
+                {showCoach ? 'Hide Coach' : 'Improve Goal with AI'}
+              </button>
+              {showCoach && (
+                <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                   <div className="bg-white rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
+                    <button 
+                      onClick={() => setShowCoach(false)}
+                       className="absolute top-4 right-4 text-slate-500 hover:text-slate-700 font-bold text-sm"
+                    >
+                      Close [X]
+                    </button>
+                    <div className="p-6">
+                      <AiInsightCard module="goal" rawGoal={goalText} />
                     </div>
-                  )}
+                  </div>
                 </div>
-              );
-            })()
+              )}
+            </div>
           )}
 
           {editableIntent && (

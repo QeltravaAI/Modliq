@@ -3,10 +3,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+require('dotenv').config();
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
-const dotenv_1 = __importDefault(require("dotenv"));
 const datasets_routes_1 = __importDefault(require("./routes/datasets.routes"));
+const auth_routes_1 = __importDefault(require("./routes/auth.routes"));
 const datasetStore_1 = require("./data/datasetStore");
 const optimizationStore_1 = require("./data/optimizationStore");
 const workspaceStore_1 = require("./data/workspaceStore");
@@ -18,13 +19,10 @@ const path_1 = __importDefault(require("path"));
 const axios_1 = __importDefault(require("axios"));
 const auth_1 = require("./middleware/auth");
 const optimizationJobs_1 = require("./db/optimizationJobs");
-dotenv_1.default.config();
 const app = (0, express_1.default)();
 const port = process.env.PORT || 3001;
 const ML_ENGINE_URL = process.env.ML_ENGINE_URL || 'http://127.0.0.1:8000';
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'https://modliq.vercel.app';
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://zygjhjhtbanevzlasjmj.supabase.co';
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
 const ML_INTERNAL_API_KEY = process.env.ML_INTERNAL_API_KEY || '';
 function mlEngineHeaders() {
     const headers = {};
@@ -45,7 +43,7 @@ const rateLimitWindow = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10
 const rateLimitMax = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '120', 10);
 const rateLimitHits = new Map();
 function rateLimit(req, res, next) {
-    const key = req.user?.id || req.ip || 'anonymous';
+    const key = req.user?.userId || req.ip || 'anonymous';
     const now = Date.now();
     const hits = rateLimitHits.get(key) || [];
     const recent = hits.filter(t => now - t < rateLimitWindow);
@@ -56,6 +54,10 @@ function rateLimit(req, res, next) {
     }
     next();
 }
+// ==================================================
+// AUTH ROUTES
+// ==================================================
+app.use('/api/auth', auth_routes_1.default);
 // ==================================================
 // DATASETS (typed routes)
 // ==================================================
@@ -210,22 +212,22 @@ const apiV1 = express_1.default.Router();
 // --------------------------------------------------
 // Workspace
 // --------------------------------------------------
-apiV1.post('/workspace/:userId/dataset', auth_1.verifySupabaseToken, (req, res) => {
+apiV1.post('/workspace/:userId/dataset', auth_1.requireAuth, (req, res) => {
     const { datasetId } = req.body;
     if (!datasetId)
         return res.status(400).json({ error: 'datasetId required' });
-    workspaceStore_1.workspaceStore.setActiveDataset(req.params.userId, datasetId);
+    (0, workspaceStore_1.setActiveDataset)(req.params.userId, datasetId);
     res.json({ success: true, activeDatasetId: datasetId });
 });
-apiV1.get('/workspace/:userId', auth_1.verifySupabaseToken, (req, res) => {
-    const workspace = workspaceStore_1.workspaceStore.getWorkspace(req.params.userId);
+apiV1.get('/workspace/:userId', auth_1.requireAuth, (req, res) => {
+    const workspace = (0, workspaceStore_1.getWorkspace)(req.params.userId);
     res.json({ success: true, workspace });
 });
 // --------------------------------------------------
 // Datasets
 // --------------------------------------------------
-apiV1.get('/datasets/:id/preview', auth_1.verifySupabaseToken, (req, res) => {
-    const dataset = datasetStore_1.datasetStore.getDataset(req.params.id);
+apiV1.get('/datasets/:id/preview', auth_1.requireAuth, async (req, res) => {
+    const dataset = await (0, datasetStore_1.getDataset)(req.params.id);
     if (!dataset)
         return res.status(404).json({ error: 'Dataset not found' });
     const rows = parseInt(req.query.rows, 10) || 50;
@@ -241,8 +243,8 @@ apiV1.get('/datasets/:id/preview', auth_1.verifySupabaseToken, (req, res) => {
         .on('end', () => res.json({ success: true, preview: results, filename: dataset.filename, analytics: dataset.analytics }))
         .on('error', () => res.status(500).json({ error: 'Failed to read preview' }));
 });
-apiV1.post('/datasets/:id/health', auth_1.verifySupabaseToken, async (req, res) => {
-    const dataset = datasetStore_1.datasetStore.getDataset(req.params.id);
+apiV1.post('/datasets/:id/health', auth_1.requireAuth, async (req, res) => {
+    const dataset = await (0, datasetStore_1.getDataset)(req.params.id);
     if (!dataset)
         return res.status(404).json({ error: 'Dataset not found' });
     const rows = [];
@@ -270,7 +272,7 @@ apiV1.post('/datasets/:id/health', auth_1.verifySupabaseToken, async (req, res) 
         res.status(500).json({ success: false, error: 'Failed to compute dataset health' });
     }
 });
-apiV1.post('/datasets/demo/:userId', auth_1.verifySupabaseToken, async (req, res) => {
+apiV1.post('/datasets/demo/:userId', auth_1.requireAuth, async (req, res) => {
     const userId = req.params.userId;
     const demoFile = findDemoDatasetPath();
     if (!demoFile) {
@@ -294,14 +296,14 @@ apiV1.post('/datasets/demo/:userId', auth_1.verifySupabaseToken, async (req, res
     }
     const analytics = computeAnalyticsStatic(results);
     const datasetId = `ds_demo_${Date.now()}`;
-    datasetStore_1.datasetStore.saveDataset(datasetId, {
+    (0, datasetStore_1.saveDataset)(datasetId, {
         id: datasetId,
         filename: 'manufacturing_data.csv',
         originalName: 'manufacturing_data.csv',
         filePath: demoFile,
         analytics,
     });
-    workspaceStore_1.workspaceStore.setActiveDataset(userId, datasetId);
+    (0, workspaceStore_1.setActiveDataset)(userId, datasetId);
     res.json({
         success: true,
         datasetId,
@@ -310,7 +312,7 @@ apiV1.post('/datasets/demo/:userId', auth_1.verifySupabaseToken, async (req, res
         analytics,
     });
 });
-apiV1.post('/datasets/upload/:userId', auth_1.verifySupabaseToken, upload.single('dataset'), async (req, res) => {
+apiV1.post('/datasets/upload/:userId', auth_1.requireAuth, upload.single('dataset'), async (req, res) => {
     try {
         if (!req.file)
             return res.status(400).json({ success: false, error: 'No file uploaded' });
@@ -381,14 +383,14 @@ apiV1.post('/datasets/upload/:userId', auth_1.verifySupabaseToken, upload.single
                 numericColumns,
                 categoricalColumns,
             };
-            datasetStore_1.datasetStore.saveDataset(datasetId, {
+            (0, datasetStore_1.saveDataset)(datasetId, {
                 id: datasetId,
                 filename: req.file.filename,
                 originalName: req.file.originalname,
                 filePath: req.file.path,
                 analytics,
             });
-            workspaceStore_1.workspaceStore.setActiveDataset(req.params.userId, datasetId);
+            (0, workspaceStore_1.setActiveDataset)(req.params.userId, datasetId);
             res.json({
                 success: true,
                 datasetId,
@@ -410,9 +412,9 @@ apiV1.post('/datasets/upload/:userId', auth_1.verifySupabaseToken, upload.single
 // --------------------------------------------------
 // Optimization
 // --------------------------------------------------
-function resolveOptimizationFile(filename) {
+async function resolveOptimizationFile(filename) {
     let localPath = path_1.default.join(uploadDir, filename);
-    const dataset = datasetStore_1.datasetStore.getDataset(filename);
+    const dataset = await (0, datasetStore_1.getDataset)(filename);
     if (dataset) {
         localPath = dataset.filePath;
     }
@@ -426,7 +428,6 @@ function resolveOptimizationFile(filename) {
         : findFileInUploads(filename);
     if (!resolvedPath)
         return null;
-    // Path traversal guard: ensure resolved path is within uploadDir
     const realUploadDir = fs_1.default.realpathSync(uploadDir);
     const realResolved = fs_1.default.realpathSync(resolvedPath);
     if (!realResolved.startsWith(realUploadDir)) {
@@ -434,13 +435,13 @@ function resolveOptimizationFile(filename) {
     }
     return { localPath: resolvedPath, dataset };
 }
-apiV1.post('/optimization/run', auth_1.verifySupabaseToken, rateLimit, async (req, res) => {
+apiV1.post('/optimization/run', auth_1.requireAuth, rateLimit, async (req, res) => {
     try {
         const { filename, template_id, intent, monthly_volume, unit_value } = req.body;
         if (!filename) {
             return res.status(400).json({ success: false, error: 'filename is required' });
         }
-        const resolved = resolveOptimizationFile(filename);
+        const resolved = await resolveOptimizationFile(filename);
         if (!resolved) {
             return res.status(400).json({
                 success: false,
@@ -473,7 +474,7 @@ apiV1.post('/optimization/run', auth_1.verifySupabaseToken, rateLimit, async (re
             });
         }
         const id = `opt_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-        optimizationStore_1.optimizationData.save(id, { id, filename: payload.filename, template_id: payload.template_id, result });
+        (0, optimizationStore_1.saveOptimization)(id, { id, filename: payload.filename, template_id: payload.template_id, result });
         dashboardData_1.dashboardData.recentActivity.unshift({
             title: `Optimization run: ${result.display_name || 'Yield'}`,
             time: 'Just now',
@@ -518,13 +519,13 @@ async function loadOptimizationJobsFromDb() {
 (0, optimizationJobs_1.initDb)().catch((err) => {
     console.error('Failed to initialize optimization job database:', err);
 });
-apiV1.post('/optimization/jobs', auth_1.verifySupabaseToken, rateLimit, async (req, res) => {
+apiV1.post('/optimization/jobs', auth_1.requireAuth, rateLimit, async (req, res) => {
     try {
         const { filename, template_id, intent, monthly_volume, unit_value } = req.body;
         if (!filename) {
             return res.status(400).json({ success: false, error: 'filename is required' });
         }
-        const resolved = resolveOptimizationFile(filename);
+        const resolved = await resolveOptimizationFile(filename);
         if (!resolved) {
             return res.status(400).json({
                 success: false,
@@ -565,7 +566,7 @@ apiV1.post('/optimization/jobs', auth_1.verifySupabaseToken, rateLimit, async (r
                 });
                 const result = response.data;
                 if (result && result.success) {
-                    optimizationStore_1.optimizationData.save(jobId, {
+                    (0, optimizationStore_1.saveOptimization)(jobId, {
                         id: jobId,
                         filename: payload.filename,
                         template_id: payload.template_id,
@@ -597,7 +598,7 @@ apiV1.post('/optimization/jobs', auth_1.verifySupabaseToken, rateLimit, async (r
         res.status(500).json({ success: false, error: error.message || 'Failed to start optimization' });
     }
 });
-apiV1.get('/optimization/jobs/:id', auth_1.verifySupabaseToken, async (req, res) => {
+apiV1.get('/optimization/jobs/:id', auth_1.requireAuth, async (req, res) => {
     try {
         const record = await (0, optimizationJobs_1.getOptimizationJobDb)(req.params.id);
         if (!record) {
@@ -627,14 +628,14 @@ apiV1.get('/warmup', async (req, res) => {
         res.json({ success: false, error: error.message });
     }
 });
-apiV1.get('/optimization/:id/results', auth_1.verifySupabaseToken, (req, res) => {
-    const record = optimizationStore_1.optimizationData.get(req.params.id);
+apiV1.get('/optimization/:id/results', auth_1.requireAuth, async (req, res) => {
+    const record = await (0, optimizationStore_1.getOptimization)(req.params.id);
     if (!record)
         return res.status(404).json({ success: false, error: 'Optimization not found' });
     res.json({ success: true, ...record });
 });
-apiV1.get('/optimization/:id/report', auth_1.verifySupabaseToken, (req, res) => {
-    const record = optimizationStore_1.optimizationData.get(req.params.id);
+apiV1.get('/optimization/:id/report', auth_1.requireAuth, async (req, res) => {
+    const record = await (0, optimizationStore_1.getOptimization)(req.params.id);
     if (!record)
         return res.status(404).json({ success: false, error: 'Optimization not found' });
     res.json({ success: true, id: record.id, generated_at: new Date().toISOString(), report: record.result });
@@ -642,7 +643,7 @@ apiV1.get('/optimization/:id/report', auth_1.verifySupabaseToken, (req, res) => 
 // --------------------------------------------------
 // AI Goal Parsing (proxied to ML Engine)
 // --------------------------------------------------
-apiV1.post('/parse-goal', auth_1.verifySupabaseToken, rateLimit, async (req, res) => {
+apiV1.post('/parse-goal', auth_1.requireAuth, rateLimit, async (req, res) => {
     try {
         const response = await axios_1.default.post(`${ML_ENGINE_URL}/parse-goal`, req.body, {
             headers: mlEngineHeaders(),

@@ -18,9 +18,10 @@ import {
 } from 'lucide-react';
 import React, { use, useEffect, useState } from 'react';
 import Image from 'next/image';
-import { createClient } from '@/utils/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { usePipelineStore } from '@/store/pipelineStore';
 import AiCopilotDrawer from '@/components/ai/AiCopilotDrawer';
+import { isExtendedModulesEnabled } from '@/lib/feature-flags';
 
 export default function ConsoleLayout({
   children,
@@ -29,29 +30,16 @@ export default function ConsoleLayout({
   children: React.ReactNode;
   params: Promise<{ userId: string }>;
 }) {
+  const resolvedParams = use(params);
   const pathname = usePathname();
   const router = useRouter();
-  const [session, setSession] = useState<any>(null);
-  const supabase = createClient();
-  const resolvedParams = use(params);
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
-
-    return () => subscription.unsubscribe();
-  }, [supabase]);
+  const { user, logout } = useAuth();
 
   const hydrateWorkspace = usePipelineStore((s) => s.hydrateWorkspace);
   const currentDatasetId = usePipelineStore((s) => s.filename);
 
   useEffect(() => {
-    if (session?.user?.id && !currentDatasetId) {
+    if (user?.id && !currentDatasetId) {
       fetch('/api/user/workspace')
         .then((r) => r.json())
         .then((data) => {
@@ -61,12 +49,14 @@ export default function ConsoleLayout({
         })
         .catch(console.error);
     }
-  }, [session, currentDatasetId, hydrateWorkspace]);
+  }, [user, currentDatasetId, hydrateWorkspace]);
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    await logout();
     router.push('/');
   };
+
+  const extendedEnabled = isExtendedModulesEnabled();
 
   const navItems = [
     { name: 'Dashboard', href: `/${resolvedParams.userId}/modliq-console/dashboard`, icon: LayoutDashboard },
@@ -75,9 +65,11 @@ export default function ConsoleLayout({
     { name: 'Optimization', href: `/${resolvedParams.userId}/modliq-console/optimization-progress`, icon: Activity },
     { name: 'Results', href: `/${resolvedParams.userId}/modliq-console/results`, icon: BarChart2 },
     { name: 'Quality Studio', href: `/${resolvedParams.userId}/modliq-console/studio/quality`, icon: Microscope },
-    { name: 'Supply Chain', href: `/${resolvedParams.userId}/modliq-console/supply-chain`, icon: Truck },
-    { name: 'Operations', href: `/${resolvedParams.userId}/modliq-console/operations`, icon: Factory },
-    { name: 'Lean', href: `/${resolvedParams.userId}/modliq-console/lean`, icon: Zap },
+    ...(extendedEnabled ? [
+      { name: 'Supply Chain', href: `/${resolvedParams.userId}/modliq-console/supply-chain`, icon: Truck },
+      { name: 'Operations', href: `/${resolvedParams.userId}/modliq-console/operations`, icon: Factory },
+      { name: 'Lean', href: `/${resolvedParams.userId}/modliq-console/lean`, icon: Zap },
+    ] : []),
   ];
 
   return (
@@ -126,10 +118,10 @@ export default function ConsoleLayout({
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-slate-900 truncate">
-                {session?.user?.email || 'User'}
+                {user?.email || 'User'}
               </p>
               <p className="text-xs text-slate-500 truncate">
-                {session?.user?.email || ''}
+                {user?.email || ''}
               </p>
             </div>
           </div>

@@ -5,6 +5,8 @@ import axios from 'axios';
 import { Zap, Layout, CheckSquare, Clipboard, Clock, Archive, Plus, Loader2 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import AiInsightCard from '@/components/ai/AiInsightCard';
+import { isExtendedModulesEnabled } from '@/lib/feature-flags';
+import GatedModule from '@/components/GatedModule';
 
 export default function LeanPage({ params }: { params: Promise<{ userId: string }> }) {
   const { userId } = use(params);
@@ -51,6 +53,10 @@ export default function LeanPage({ params }: { params: Promise<{ userId: string 
   const [kanbanResult, setKanbanResult] = useState<any>(null);
 
   const [formLoading, setFormLoading] = useState(false);
+
+  if (!isExtendedModulesEnabled()) {
+    return <GatedModule title="Lean Manufacturing" description="Deploy Kaizen boards, log waste events, score 5S audits, and run lean calculators." />;
+  }
 
   useEffect(() => {
     async function loadLeanData() {

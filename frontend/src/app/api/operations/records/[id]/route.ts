@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { createClient } from '@/utils/supabase/server';
+import { verifyJwt } from '@/lib/auth';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
@@ -11,15 +11,17 @@ export async function PATCH(
 ) {
   try {
     const cookieStore = await cookies();
-    const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (!session || !session.user?.id) {
+    const token = cookieStore.get('modliq_token')?.value;
+    if (!token) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const payload = verifyJwt(token);
+    if (!payload) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const { id } = await params;
-    const userId = session.user.id;
+    const userId = payload.userId;
     const body = await request.json();
 
     // Check ownership
@@ -65,15 +67,17 @@ export async function DELETE(
 ) {
   try {
     const cookieStore = await cookies();
-    const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (!session || !session.user?.id) {
+    const token = cookieStore.get('modliq_token')?.value;
+    if (!token) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const payload = verifyJwt(token);
+    if (!payload) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const { id } = await params;
-    const userId = session.user.id;
+    const userId = payload.userId;
 
     const record = await prisma.operationsRecord.findUnique({
       where: { id }

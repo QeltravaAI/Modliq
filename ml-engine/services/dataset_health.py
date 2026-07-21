@@ -72,7 +72,10 @@ def analyze_dataset_health(
 
     # Coerce numeric-looking string columns
     for col in df.columns:
-        df[col] = pd.to_numeric(df[col], errors="ignore")
+        try:
+            df[col] = pd.to_numeric(df[col], errors="raise")
+        except Exception:
+            pass
 
     total_rows = len(df)
     total_columns = len(df.columns)

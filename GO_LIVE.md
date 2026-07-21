@@ -56,10 +56,8 @@ Add/update:
 
 | Variable | Value |
 |----------|-------|
-| `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Your Supabase publishable key |
-| `DATABASE_URL` | Supabase Postgres pooler URL |
-| `DIRECT_URL` | Supabase Postgres direct URL |
+| `DATABASE_URL` | `mongodb+srv://qeltravaai_db_user:<DB_PASSWORD>@cluster0.culwvqq.mongodb.net/modliq?retryWrites=true&w=majority` |
+| `DIRECT_URL` | `mongodb+srv://qeltravaai_db_user:<DB_PASSWORD>@cluster0.culwvqq.mongodb.net/modliq?retryWrites=true&w=majority` |
 | `NEXT_PUBLIC_API_URL` | `https://modliq-1.onrender.com` |
 | `NEXTAUTH_SECRET` | `<output from openssl rand -base64 32>` |
 | `NEXTAUTH_URL` | `https://modliq.vercel.app` |
@@ -88,9 +86,7 @@ Add/update:
 | `FRONTEND_ORIGIN` | `https://modliq.vercel.app` |
 | `ML_ENGINE_URL` | `https://modliq.onrender.com` |
 | `ML_INTERNAL_API_KEY` | `<same as ML engine>` |
-| `DATABASE_URL` | `<supabase pooler or direct>` |
-| `SUPABASE_URL` | `https://zygjhjhtbanevzlasjmj.supabase.co` |
-| `SUPABASE_ANON_KEY` | `<your supabase anon key>` |
+| `DATABASE_URL` | `mongodb+srv://qeltravaai_db_user:<DB_PASSWORD>@cluster0.culwvqq.mongodb.net/modliq?retryWrites=true&w=majority` |
 | `REQUEST_TIMEOUT_MS` | `30000` |
 | `JOB_TIMEOUT_MS` | `180000` |
 | `RATE_LIMIT_WINDOW_MS` | `60000` |
@@ -125,18 +121,15 @@ npx prisma generate
 npx prisma migrate deploy
 ```
 
-Verify `OptimizationJob` table exists in Supabase Table Editor.
+Verify `OptimizationJob` collection exists in MongoDB Atlas.
 
 ---
 
-## Step 7: Apply RLS Policies
+## Step 7: Verify MongoDB Indexes
 
-Go to: Supabase Dashboard → SQL Editor
+Go to: MongoDB Atlas → Collections → modliq → Indexes
 
-Run the contents of:
-```
-frontend/prisma/migrations/20260103_enable_rls/rls_policies.sql
-```
+Ensure indexes exist on user-scoped fields for query performance.
 
 Verify with:
 ```sql
@@ -288,7 +281,6 @@ NO-GO if any unchecked.
 |------|---------|
 | `backend/smoke.mjs` | Backend health/warmup smoke test |
 | `ml-engine/smoke_test.py` | ML engine health/warmup/auth smoke test |
-| `frontend/prisma/migrations/20260103_enable_rls/rls_policies.sql` | RLS policies for Supabase |
 | `backend/.env.example` | Backend env template |
 | `ml-engine/.env.example` | ML engine env template |
 | `frontend/.env.example` | Frontend env template |

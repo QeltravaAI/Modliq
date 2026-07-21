@@ -1,17 +1,14 @@
-import { createClient } from './supabase/client';
 import axios from 'axios';
-
-export const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001').trim();
+import { verifyJwt, getAuthFromHeaders } from '@/lib/auth';
+import { API_URL } from '@/lib/config';
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
-  try {
-    const supabase = createClient();
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.access_token) {
-      return { Authorization: `Bearer ${session.access_token}` };
-    }
-  } catch (e) {
-    // ignore
+  if (typeof document === 'undefined') {
+    return {};
+  }
+  const token = localStorage.getItem('modliq_token');
+  if (token) {
+    return { Authorization: `Bearer ${token}` };
   }
   return {};
 }
@@ -20,7 +17,7 @@ export const apiClient = axios.create({
   baseURL: API_URL,
 });
 
-apiClient.interceptors.request.use(async (config) => {
+apiClient.interceptors.request.use(async (config: any) => {
   const headers = await getAuthHeaders();
   Object.assign(config.headers, headers);
   return config;

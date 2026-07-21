@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@/utils/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -17,7 +17,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
-  const supabase = createClient();
+  const { login, signup } = useAuth();
 
   if (!isOpen) return null;
 
@@ -28,44 +28,13 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
     try {
       if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-
-        if (error) {
-          setError(error.message || 'Invalid credentials');
-        } else {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.user?.id) {
-            router.push(`/${session.user.id}/modliq-console/dashboard`);
-            onClose();
-          } else {
-            setError('Login succeeded but session missing');
-          }
-        }
+        await login(email, password);
+        router.push(`/dashboard`);
+        onClose();
       } else {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: {
-              name,
-            },
-          },
-        });
-
-        if (error) {
-          setError(error.message || 'Failed to register');
-        } else {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.user?.id) {
-            router.push(`/${session.user.id}/modliq-console/dashboard`);
-            onClose();
-          } else {
-            setError('Signup succeeded but session missing');
-          }
-        }
+        await signup(name, email, password);
+        router.push(`/dashboard`);
+        onClose();
       }
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred');
@@ -79,22 +48,9 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: 'demo@modliq.com',
-        password: 'modliqdemo',
-      });
-
-      if (error) {
-        setError('Demo login failed. Ensure demo@modliq.com exists in Supabase.');
-      } else {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user?.id) {
-          router.push(`/${session.user.id}/modliq-console/dashboard`);
-          onClose();
-        } else {
-          setError('Demo login failed: session missing');
-        }
-      }
+      await login('demo@modliq.com', 'modliqdemo');
+      router.push(`/dashboard`);
+      onClose();
     } catch (err: any) {
       setError(err.message || 'Demo login failed');
     } finally {

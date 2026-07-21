@@ -15,38 +15,52 @@ import {
   ChevronUp,
 } from "lucide-react";
 import AuthModal from "@/components/auth/AuthModal";
-import { createClient } from "@/utils/supabase/client";
 
 export default function HomeOrLandingPage() {
   const router = useRouter();
   const [isMounted, setIsMounted] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
-  const [session, setSession] = useState<any>(null);
 
   const landingRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
-  const supabase = createClient();
 
   useEffect(() => {
     setIsMounted(true);
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
-
-    return () => subscription.unsubscribe();
-  }, [supabase]);
-
-  useEffect(() => {
-    if (session?.user?.id) {
-      router.push(`/${session.user.id}/modliq-console/dashboard`);
+    const token = localStorage.getItem('modliq_token');
+    if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        if (payload?.userId) {
+          router.push(`/${payload.userId}/modliq-console/dashboard`);
+        }
+      } catch {
+        localStorage.removeItem('modliq_token');
+      }
     }
-  }, [session, router]);
+  }, [router]);
+
+  useGSAP(() => {
+    if (isMounted) {
+      gsap.from(".hero-el", {
+        opacity: 0,
+        y: 25,
+        stagger: 0.15,
+        duration: 0.8,
+        ease: "power3.out",
+      });
+    }
+  }, { scope: landingRef, dependencies: [isMounted] });
+
+  useGSAP(() => {
+    if (showLoginModal && modalRef.current) {
+      gsap.fromTo(modalRef.current,
+        { scale: 0.9, opacity: 0 },
+        { scale: 1, opacity: 1, duration: 0.4, ease: "back.out(1.5)" }
+      );
+    }
+  }, [showLoginModal]);
 
   // ── GSAP Landing animations ────────────────
   useGSAP(() => {

@@ -1,8 +1,5 @@
 import axios from "axios";
-
-const API_URL = (
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001"
-).trim();
+import { API_URL } from "@/lib/config";
 
 export const getResults =
   async () => {

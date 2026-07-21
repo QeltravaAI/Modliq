@@ -4,7 +4,6 @@
 ## Prerequisites
 - Vercel account with frontend project linked
 - Render account with backend + ML engine services
-- Supabase project: zygjhjhtbanevzlasjmj
 - Rotated API keys for NVIDIA, Groq, OpenRouter
 - Generated secrets:
   - NEXTAUTH_SECRET: run `openssl rand -base64 32`
@@ -18,10 +17,8 @@ Project: https://vercel.com/sathishsathishkumar/modliq/settings/environment-vari
 
 | Variable | Value | Type |
 |----------|-------|------|
-| NEXT_PUBLIC_SUPABASE_URL | https://zygjhjhtbanevzlasjmj.supabase.co | Public |
-| NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY | <YOUR_PUBLISHABLE_KEY> | Public |
-| DATABASE_URL | postgresql://postgres:<DB_PASSWORD>@db.zygjhjhtbanevzlasjmj.supabase.co:5432/postgres?pgbouncer=true | Secret |
-| DIRECT_URL | postgresql://postgres:<DB_PASSWORD>@db.zygjhjhtbanevzlasjmj.supabase.co:5432/postgres | Secret |
+| DATABASE_URL | mongodb+srv://qeltravaai_db_user:<DB_PASSWORD>@cluster0.culwvqq.mongodb.net/modliq?retryWrites=true&w=majority | Secret |
+| DIRECT_URL | mongodb+srv://qeltravaai_db_user:<DB_PASSWORD>@cluster0.culwvqq.mongodb.net/modliq?retryWrites=true&w=majority | Secret |
 | NEXT_PUBLIC_API_URL | https://modliq-1.onrender.com | Public |
 | NEXTAUTH_SECRET | <openssl rand -base64 32> | Secret |
 | NEXTAUTH_URL | https://modliq.vercel.app | Public |
@@ -53,9 +50,7 @@ Service: https://dashboard.render.com/web/srv-xxx/modliq-1/environment
 | JOB_TIMEOUT_MS | 180000 | Default |
 | RATE_LIMIT_WINDOW_MS | 60000 | Default |
 | RATE_LIMIT_MAX_REQUESTS | 120 | Default |
-| SUPABASE_URL | https://zygjhjhtbanevzlasjmj.supabase.co | Default |
-| SUPABASE_ANON_KEY | <your-supabase-anon-key> | Default |
-| DATABASE_URL | postgresql://postgres:<DB_PASSWORD>@db.zygjhjhtbanevzlasjmj.supabase.co:5432/postgres?pgbouncer=true | Default |
+| DATABASE_URL | mongodb+srv://qeltravaai_db_user:<DB_PASSWORD>@cluster0.culwvqq.mongodb.net/modliq?retryWrites=true&w=majority | Default |
 | ML_INTERNAL_API_KEY | <same-as-ml-engine> | Default |
 
 After saving: Trigger manual deploy in Render.

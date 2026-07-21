@@ -59,7 +59,7 @@ async function run() {
   }
 
   try {
-    const r = await request(`${BACKEND}/warmup`);
+    const r = await request(`${BACKEND}/api/v1/warmup`);
     results.push({ name: 'backend_warmup', status: r.status, ok: r.status === 200 });
   } catch (e) {
     results.push({ name: 'backend_warmup', status: 0, ok: false });
@@ -70,13 +70,6 @@ async function run() {
     results.push({ name: 'ml_root', status: r.status, ok: r.status === 200 });
   } catch (e) {
     results.push({ name: 'ml_root', status: 0, ok: false });
-  }
-
-  try {
-    const r = await request(`${ML}/health`);
-    results.push({ name: 'ml_health', status: r.status, ok: r.status === 200 });
-  } catch (e) {
-    results.push({ name: 'ml_health', status: 0, ok: false });
   }
 
   try {

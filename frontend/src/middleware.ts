@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import { createClient } from '@/utils/supabase/middleware';
+import { verifyJwt, getAuthFromHeaders } from '@/lib/auth';
 
 export async function middleware(req: NextRequest) {
-  const { supabase, supabaseResponse } = createClient(req);
-
-  const { data: { session } } = await supabase.auth.getSession();
+  const token = req.cookies.get('modliq_token')?.value || getAuthFromHeaders(req.headers);
+  const payload = token ? verifyJwt(token) : null;
+  const session = payload ? { user: { id: payload.userId, email: payload.email } } : null;
   const { pathname } = req.nextUrl;
 
   const consoleRouteMatch = pathname.match(/^\/([^/]+)\/modliq-console/);
@@ -55,7 +55,7 @@ export async function middleware(req: NextRequest) {
     }
   }
 
-  return supabaseResponse;
+  return NextResponse.next();
 }
 
 export const config = {

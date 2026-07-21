@@ -5,6 +5,8 @@ import axios from 'axios';
 import { Truck, ShieldAlert, AlertCircle, Plus, Loader2 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import AiInsightCard from '@/components/ai/AiInsightCard';
+import { isExtendedModulesEnabled } from '@/lib/feature-flags';
+import GatedModule from '@/components/GatedModule';
 
 const COLORS = ['#2B70AB', '#1B2A4A', '#E28743', '#76B5C5', '#873E23', '#1F3F49'];
 
@@ -26,6 +28,10 @@ export default function SupplyChainPage({ params }: { params: Promise<{ userId: 
   const [linkedBatchId, setLinkedBatchId] = useState('');
   const [linkedYield, setLinkedYield] = useState('95.0');
   const [formLoading, setFormLoading] = useState(false);
+
+  if (!isExtendedModulesEnabled()) {
+    return <GatedModule title="Supply Chain" description="Trace raw materials, assess supplier scorecard ratings, and flag quality risks." />;
+  }
 
   useEffect(() => {
     async function loadSCData() {

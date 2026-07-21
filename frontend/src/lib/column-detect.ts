@@ -29,16 +29,17 @@ export function detectModules(columns: string[]): DetectedModules {
     'downtime_reason', 'runtime', 'planned_time', 'cycle_time', 'ideal_cycle_time', 
     'good_count', 'reject_count', 'scrap', 'scrap_rate', 'throughput'
   ];
-  const detectedOps = columns.filter((_, idx) => 
+  const detectedOps = columns.filter((_, idx) =>
     operationsPatterns.some(pat => normalized[idx].includes(pat))
   );
+  const detectedOpsNormalized = detectedOps.map(c => c.toLowerCase().trim().replace(/[\s_-]+/g, '_'));
 
   // Lean columns
   const leanPatterns = [
-    'waste_type', 'loss_minutes', 'waiting_time', 'changeover_time', 'wip', 
+    'waste_type', 'loss_minutes', 'waiting_time', 'changeover_time', 'wip',
     'inventory', 'rework', 'defects'
   ];
-  const detectedLean = columns.filter((_, idx) => 
+  const detectedLean = columns.filter((_, idx) =>
     leanPatterns.some(pat => normalized[idx].includes(pat))
   );
 
@@ -47,7 +48,7 @@ export function detectModules(columns: string[]): DetectedModules {
     qualityStudio: columns.some(c => c.toLowerCase().includes('yield') || c.toLowerCase().includes('defect') || c.toLowerCase().includes('pass')),
     operations: detectedOps.length >= 2,
     supplyChain: detectedSC.length >= 2,
-    lean: detectedLean.length >= 1 || detectedOps.includes('downtime_reason') || detectedOps.includes('downtime_minutes'),
+    lean: detectedLean.length >= 1 || detectedOpsNormalized.includes('downtime_reason') || detectedOpsNormalized.includes('downtime_minutes'),
     detectedColumns: {
       supplyChain: detectedSC,
       operations: detectedOps,

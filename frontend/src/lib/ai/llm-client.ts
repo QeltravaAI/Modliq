@@ -1,4 +1,38 @@
 import OpenAI from 'openai';
+import { headroomCompressMessages } from './headroom';
+
+const LLM_CACHE = new Map<string, { value: string; expiresAt: number }>();
+const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
+const CIRCUIT_STATES = new Map<string, { failures: number; lastFailure: number }>();
+const CIRCUIT_FAILURE_THRESHOLD = 3;
+const CIRCUIT_COOLDOWN_MS = 30_000;
+
+function cacheKey(provider: string, model: string, messages: OpenAI.ChatCompletionMessageParam[]) {
+  const normalized = messages.map((m) => `${m.role}:${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`).join('|');
+  return `${provider}:${model}:${normalized}`;
+}
+
+function isCircuitOpen(provider: string) {
+  const state = CIRCUIT_STATES.get(provider);
+  if (!state) return false;
+  if (state.failures < CIRCUIT_FAILURE_THRESHOLD) return false;
+  if (Date.now() - state.lastFailure > CIRCUIT_COOLDOWN_MS) {
+    CIRCUIT_STATES.delete(provider);
+    return false;
+  }
+  return true;
+}
+
+function recordFailure(provider: string) {
+  const state = CIRCUIT_STATES.get(provider) || { failures: 0, lastFailure: 0 };
+  state.failures += 1;
+  state.lastFailure = Date.now();
+  CIRCUIT_STATES.set(provider, state);
+}
+
+function recordSuccess(provider: string) {
+  CIRCUIT_STATES.delete(provider);
+}
 
 export interface CallLLMParams {
   systemPrompt: string;
@@ -17,7 +51,7 @@ export async function callLLM({
   model,
   maxTokens = 1500,
   temperature = 0.2,
-  timeoutMs = 30000,
+  timeoutMs = 60000,
   jsonMode = false,
 }: CallLLMParams): Promise<string> {
   const aiEnabled = process.env.AI_FEATURES_ENABLED !== 'false';
@@ -71,13 +105,31 @@ export async function callLLM({
     defaultModel = process.env.AI_MODEL_FAST || 'llama-3.3-70b-versatile';
   } else if (provider === 'nvidia') {
     baseURL = process.env.NVIDIA_BASE_URL || 'https://integrate.api.nvidia.com/v1';
-    defaultModel = process.env.AI_MODEL_FAST || 'meta/llama-3.3-70b-instruct';
+    defaultModel = process.env.AI_MODEL_NVIDIA_FAST || 'meta/llama-3.3-70b-instruct';
   } else {
     baseURL = 'https://openrouter.ai/api/v1';
     defaultModel = 'openai/gpt-4o-mini';
   }
 
-  const selectedModel = model || defaultModel;
+  // An explicit `model` may come from AI_MODEL_REASONING (or a caller). That
+  // value can belong to a different provider (e.g. an NVIDIA "omni" multimodal
+  // model). Sending a foreign model name to the active provider causes errors
+  // such as "this model does not support image input". Only honor an explicit
+  // model when it is text-capable and matches the active provider's namespace.
+  const providerNamespace: Record<string, string> = {
+    groq: 'groq/',
+    nvidia: 'nvidia/',
+    openrouter: '',
+  };
+  let selectedModel = defaultModel;
+  if (model) {
+    const ns = providerNamespace[provider];
+    const belongsToProvider =
+      provider === 'openrouter'
+        ? true // OpenRouter routes any model id through its proxy
+        : model.startsWith(ns);
+    selectedModel = belongsToProvider ? model : defaultModel;
+  }
 
   const client = new OpenAI({
     apiKey,
@@ -95,16 +147,43 @@ export async function callLLM({
       extraHeaders['X-Title'] = 'Modliq';
     }
 
+    const rawMessages: OpenAI.ChatCompletionMessageParam[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ];
+
+    const compressed = await headroomCompressMessages(rawMessages, selectedModel || 'gpt-4o');
+    const messages = compressed.messages;
+
+    if (compressed.tokensSaved > 0) {
+      console.log(
+        `[Headroom] Compressed LLM prompt: ${compressed.tokensBefore} -> ${compressed.tokensAfter} tokens ` +
+          `(${compressed.compressionRatio > 0 ? Math.round(compressed.compressionRatio * 100) : 0}% reduction) ` +
+          `transforms: ${compressed.transformsApplied.join(', ')}`
+      );
+    }
+
+    const key = cacheKey(provider, selectedModel, messages);
+    const cached = LLM_CACHE.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+
+    if (isCircuitOpen(provider)) {
+      return JSON.stringify({
+        success: false,
+        code: 'AI_ERROR',
+        message: 'AI provider is temporarily unavailable. Deterministic Modliq results are still available.'
+      });
+    }
+
     const response = await client.chat.completions.create(
       {
         model: selectedModel,
         temperature,
         max_tokens: maxTokens,
         response_format: jsonMode ? { type: 'json_object' } : undefined,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
+        messages,
       },
       {
         signal: controller.signal,
@@ -112,37 +191,47 @@ export async function callLLM({
       }
     );
 
-    return (
-      response.choices?.[0]?.message?.content?.trim() ||
-      JSON.stringify({
-        success: false,
-        message: 'AI response was empty. Deterministic Modliq results are still available.'
-      })
-    );
+    const content = response.choices?.[0]?.message?.content?.trim() || JSON.stringify({
+      success: false,
+      message: 'AI response was empty. Deterministic Modliq results are still available.'
+    });
+
+    LLM_CACHE.set(key, { value: content, expiresAt: Date.now() + DEFAULT_CACHE_TTL_MS });
+    recordSuccess(provider);
+
+    return content;
   } catch (error: any) {
     console.error(`LLM Call failed for provider ${provider}:`, error);
-    
+    recordFailure(provider);
+
     // If primary failed, try fallback immediately once (Groq -> NVIDIA fallback)
-    if (provider === 'groq' && nvidiaKey) {
+    if (provider === 'groq' && nvidiaKey && !isCircuitOpen('nvidia')) {
       console.log('Attempting backup fallback to NVIDIA NIM...');
       try {
         const backupClient = new OpenAI({
           apiKey: nvidiaKey,
           baseURL: process.env.NVIDIA_BASE_URL || 'https://integrate.api.nvidia.com/v1',
         });
+        const backupRawMessages: OpenAI.ChatCompletionMessageParam[] = [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ];
+        const backupCompressed = await headroomCompressMessages(backupRawMessages, 'meta/llama-3.3-70b-instruct');
+        const backupMessages = backupCompressed.messages as OpenAI.ChatCompletionMessageParam[];
+
         const response = await backupClient.chat.completions.create({
           model: 'meta/llama-3.3-70b-instruct',
           temperature,
           max_tokens: maxTokens,
           response_format: jsonMode ? { type: 'json_object' } : undefined,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt },
-          ],
+          messages: backupMessages,
         });
-        return response.choices?.[0]?.message?.content?.trim() || '';
+        const content = response.choices?.[0]?.message?.content?.trim() || '';
+        recordSuccess('nvidia');
+        return content;
       } catch (backupErr) {
         console.error('NVIDIA NIM Backup fallback also failed:', backupErr);
+        recordFailure('nvidia');
       }
     }
 

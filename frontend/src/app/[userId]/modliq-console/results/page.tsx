@@ -11,32 +11,14 @@ import AiInsightCard from '@/components/ai/AiInsightCard';
 
 export default function ResultsPage() {
   const result = usePipelineStore((s) => s.result);
-
-  if (!result || !result.success) {
-    return (
-      <div className="p-8 max-w-7xl mx-auto h-full flex flex-col">
-        <header className="mb-8">
-          <h1 className="text-2xl font-bold text-[#1B2A4A]">Optimization Results</h1>
-          <p className="text-slate-500 text-sm mt-1">Review the recommended parameters, predicted ROI, and feature importance.</p>
-        </header>
-
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-8 text-center">
-          <BarChart2 className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-          <p className="text-slate-600 text-sm">No valid optimization results to display.</p>
-          <p className="text-slate-400 text-xs mt-1">Run an optimization from the Goal page to generate results.</p>
-        </div>
-      </div>
-    );
-  }
-
-  const metrics = result.metrics || { r2_score: 0, rmse: 0, mae: 0 };
-  const roi = result.roi || { currency: '', current_yield: 0, expected_yield: 0, yield_improvement: 0, monthly_volume: 0, unit_value: 0, additional_good_units: 0, monthly_savings_low: 0, monthly_savings_high: 0, monthly_savings_estimate: 0, payback_period: '', savings_range_text: '' };
-  const drivers = result.drivers || [];
-  const topDriver = drivers[0];
-
   const filename = usePipelineStore((s) => s.filename);
   const intent = usePipelineStore((s) => s.intent);
   const healthReport = usePipelineStore((s) => s.healthReport);
+
+  const metrics = result?.metrics || { r2_score: 0, rmse: 0, mae: 0 };
+  const roi = result?.roi || { currency: '', current_yield: 0, expected_yield: 0, yield_improvement: 0, monthly_volume: 0, unit_value: 0, additional_good_units: 0, monthly_savings_low: 0, monthly_savings_high: 0, monthly_savings_estimate: 0, payback_period: '', savings_range_text: '' };
+  const drivers = result?.drivers || [];
+  const topDriver = drivers[0];
 
   const generateSOP = () => {
     const lines = [
@@ -50,7 +32,7 @@ export default function ResultsPage() {
       `## 2. Recommended Settings (Trial Target)`,
     ];
 
-    if (result.recommended_settings) {
+    if (result?.recommended_settings) {
       Object.entries(result.recommended_settings).map(([key, value]) => {
         const range = result.recommended_range?.[key];
         lines.push(`- **${key}**: ${value} (Safe Range: ${range ? `${range[0]} - ${range[1]}` : 'N/A'})`);
@@ -95,7 +77,6 @@ export default function ResultsPage() {
     URL.revokeObjectURL(url);
   };
 
-  // State hooks for AI actions on Results page
   const [showAiSop, setShowAiSop] = React.useState(false);
   const [aiSopContent, setAiSopContent] = React.useState<any>(null);
   const [sopLoading, setSopLoading] = React.useState(false);
@@ -109,7 +90,6 @@ export default function ResultsPage() {
     try {
       const res = await axios.post('/api/ai/sop');
       if (res.data.code === 'AI_NOT_CONFIGURED') {
-        // Fallback: Trigger baseline file download instead
         setSopError('AI key not configured. Triggering baseline markdown download instead.');
         generateSOP();
       } else {
@@ -123,6 +103,23 @@ export default function ResultsPage() {
       setSopLoading(false);
     }
   };
+
+  if (!result || !result.success) {
+    return (
+      <div className="p-8 max-w-7xl mx-auto h-full flex flex-col">
+        <header className="mb-8">
+          <h1 className="text-2xl font-bold text-[#1B2A4A]">Optimization Results</h1>
+          <p className="text-slate-500 text-sm mt-1">Review the recommended parameters, predicted ROI, and feature importance.</p>
+        </header>
+
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-8 text-center">
+          <BarChart2 className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+          <p className="text-slate-600 text-sm">No valid optimization results to display.</p>
+          <p className="text-slate-400 text-xs mt-1">Run an optimization from the Goal page to generate results.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-8 max-w-7xl mx-auto h-full flex flex-col overflow-y-auto space-y-6">

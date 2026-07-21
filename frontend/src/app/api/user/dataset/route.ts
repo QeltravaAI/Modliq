@@ -1,16 +1,17 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { createClient } from '@/utils/supabase/server';
-
-const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001').trim();
+import { verifyJwt } from '@/lib/auth';
+import { API_URL } from '@/lib/config';
 
 export async function POST(request: Request) {
   try {
     const cookieStore = await cookies();
-    const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (!session || !session.user?.id) {
+    const token = cookieStore.get('modliq_token')?.value;
+    if (!token) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const payload = verifyJwt(token);
+    if (!payload) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -21,14 +22,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'datasetId is required' }, { status: 400 });
     }
 
-    const res = await fetch(`${API_URL}/api/v1/workspace/${session.user.id}/dataset`, {
+    const res = await fetch(`${API_URL}/api/v1/workspace/${payload.userId}/dataset`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
       body: JSON.stringify({ datasetId }),
     });
 
     if (!res.ok) {
-      throw new Error('Backend failed to save dataset');
+      const detail = await res.text().catch(() => '');
+      console.error('Backend failed to save dataset:', res.status, detail);
+      return NextResponse.json(
+        { error: 'Failed to save dataset', status: res.status },
+        { status: 502 }
+      );
     }
 
     return NextResponse.json({ success: true, datasetId });
@@ -44,14 +53,18 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   try {
     const cookieStore = await cookies();
-    const supabase = createClient(cookieStore);
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (!session || !session.user?.id) {
+    const token = cookieStore.get('modliq_token')?.value;
+    if (!token) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const payload = verifyJwt(token);
+    if (!payload) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const res = await fetch(`${API_URL}/api/v1/workspace/${session.user.id}`);
+    const res = await fetch(`${API_URL}/api/v1/workspace/${payload.userId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     const data = await res.json();
     
     return NextResponse.json(data);

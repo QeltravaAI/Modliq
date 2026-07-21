@@ -5,6 +5,28 @@ import httpx
 import pandas as pd
 from typing import Literal
 from schemas.goal import ParsedGoal
+try:
+    import headroom
+    _HAS_HEADROOM = True
+except ImportError:
+    headroom = None
+    _HAS_HEADROOM = False
+
+
+def _compress_llm_messages(messages: list[dict], model: str = "gpt-4o") -> list[dict]:
+    if not _HAS_HEADROOM or headroom is None:
+        return messages
+    try:
+        result = headroom.compress(messages, model=model)
+        if result.tokens_saved > 0:
+            print(
+                f"[Headroom] Compressed goal parse prompt: {result.tokens_before} -> {result.tokens_after} tokens "
+                f"({result.compression_ratio * 100:.0f}% reduction) transforms: {', '.join(result.transforms_applied)}"
+            )
+        return result.messages
+    except Exception as exc:
+        print(f"[Headroom] Compression skipped: {exc}")
+        return messages
 
 
 TEMPLATES = {
@@ -158,6 +180,9 @@ async def _call_nvidia(goal_text: str, template_id: str, columns: list[str]) -> 
         goal_text=goal_text, template_id=template_id, columns=", ".join(columns)
     )
 
+    messages = [{"role": "user", "content": prompt}]
+    compressed_messages = _compress_llm_messages(messages, model="meta/llama-3.3-70b-instruct")
+
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(4.0)) as client:
             response = await client.post(
@@ -168,7 +193,7 @@ async def _call_nvidia(goal_text: str, template_id: str, columns: list[str]) -> 
                 },
                 json={
                     "model": "meta/llama-3.3-70b-instruct",
-                    "messages": [{"role": "user", "content": prompt}],
+                    "messages": compressed_messages,
                     "temperature": 0.2,
                     "top_p": 0.7,
                     "max_tokens": 1024,
@@ -197,6 +222,9 @@ async def _call_groq(goal_text: str, template_id: str, columns: list[str]) -> di
         goal_text=goal_text, template_id=template_id, columns=", ".join(columns)
     )
 
+    messages = [{"role": "user", "content": prompt}]
+    compressed_messages = _compress_llm_messages(messages, model="llama-3.3-70b-versatile")
+
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(4.0)) as client:
             response = await client.post(
@@ -206,8 +234,8 @@ async def _call_groq(goal_text: str, template_id: str, columns: list[str]) -> di
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": "openai/gpt-oss-120b",
-                    "messages": [{"role": "user", "content": prompt}],
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": compressed_messages,
                     "temperature": 0.2,
                     "top_p": 0.7,
                     "max_tokens": 1024,
@@ -236,6 +264,9 @@ async def _call_openrouter(goal_text: str, template_id: str, columns: list[str])
         goal_text=goal_text, template_id=template_id, columns=", ".join(columns)
     )
 
+    messages = [{"role": "user", "content": prompt}]
+    compressed_messages = _compress_llm_messages(messages, model="openai/gpt-4o")
+
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(4.0)) as client:
             response = await client.post(
@@ -246,7 +277,7 @@ async def _call_openrouter(goal_text: str, template_id: str, columns: list[str])
                 },
                 json={
                     "model": "openai/gpt-4o",
-                    "messages": [{"role": "user", "content": prompt}],
+                    "messages": compressed_messages,
                     "temperature": 0.2,
                     "top_p": 0.7,
                     "max_tokens": 1024,

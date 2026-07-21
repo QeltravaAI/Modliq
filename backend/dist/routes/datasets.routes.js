@@ -77,7 +77,7 @@ function computeMetadata(data) {
         categoricalColumns: Array.from(categoricalColumns),
     };
 }
-router.post('/upload', auth_1.verifySupabaseToken, upload.single('dataset'), async (req, res) => {
+router.post('/upload', auth_1.requireAuth, upload.single('dataset'), async (req, res) => {
     try {
         if (!req.file) {
             return res.status(400).json({ message: 'No file uploaded' });
@@ -110,7 +110,7 @@ router.post('/upload', auth_1.verifySupabaseToken, upload.single('dataset'), asy
         res.status(500).json({ message: 'Failed to process CSV' });
     }
 });
-router.post('/demo', auth_1.verifySupabaseToken, async (req, res) => {
+router.post('/demo', auth_1.requireAuth, async (req, res) => {
     try {
         const demoPath = path_1.default.join(__dirname, '../../../ml-engine/data/demo_dataset.csv');
         if (!fs_1.default.existsSync(demoPath)) {
@@ -130,7 +130,7 @@ router.post('/demo', auth_1.verifySupabaseToken, async (req, res) => {
         res.status(500).json({ message: 'Failed to load demo dataset' });
     }
 });
-router.get('/:id/preview', auth_1.verifySupabaseToken, async (req, res) => {
+router.get('/:id/preview', auth_1.requireAuth, async (req, res) => {
     try {
         const { id } = req.params;
         let filePath;

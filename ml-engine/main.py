@@ -1,14 +1,19 @@
-from fastapi import FastAPI, Header, HTTPException, Depends
-from pydantic import BaseModel
+from fastapi import FastAPI, Header, HTTPException, Depends, Request
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from fastapi.middleware.cors import CORSMiddleware
-
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse, FileResponse
+import time
+import signal
+import os
 import pandas as pd
 import numpy as np
 import math
 import io
 import base64
-import os
 from dotenv import load_dotenv
+import sys
+import logging
 
 load_dotenv()
 
@@ -46,78 +51,180 @@ from sklearn.metrics import (
 
 from sklearn.preprocessing import LabelEncoder
 
-import sys
-import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 from routers.goal import router as goal_router
+from routers.qc import router as qc_router
 from dependencies import verify_service_key
+from services.dataset_health import analyze_dataset_health
+
+logger = logging.getLogger("modliq.ml")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 app = FastAPI(title="Modliq ML Engine", version="1.0.0")
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # ==================================================
-# CORS
+# CONFIG
 # ==================================================
+MAX_CSV_BYTES = int(os.getenv("MAX_CSV_BYTES", "50_000_000"))  # 50 MB
+MAX_TRAINING_SECONDS = int(os.getenv("MAX_TRAINING_SECONDS", "120"))  # 2 minutes
+MAX_REQUEST_BODY_BYTES = int(os.getenv("MAX_REQUEST_BODY_BYTES", "100_000_000"))  # 100 MB
+
 CLIENT_ORIGIN = os.getenv("CLIENT_ORIGIN", "https://modliq.vercel.app")
 BACKEND_ORIGIN = os.getenv("BACKEND_ORIGIN", "https://modliq-1.onrender.com")
 
+# CORS scoped to the exact frontend and backend origins — no wildcard, no
+# localhost in production. Browser traffic to the ML engine is proxied via the
+# backend, so only the backend origin strictly needs to be allowed; the client
+# origin is included for completeness.
+_allowed_origins = [
+    o.strip()
+    for o in [CLIENT_ORIGIN, BACKEND_ORIGIN]
+    if o and o.strip()
+]
+if os.getenv("NODE_ENV") != "production" and "http://localhost:3000" not in _allowed_origins:
+    _allowed_origins.append("http://localhost:3000")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[CLIENT_ORIGIN.strip(), BACKEND_ORIGIN.strip(), "http://localhost:3000"],
+    allow_origins=_allowed_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Modliq-Service-Key"],
 )
 
+
+# ==================================================
+# MIDDLEWARE
+# ==================================================
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next):
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+        duration_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "method=%s path=%s status=%s duration_ms=%s",
+            request.method,
+            request.url.path,
+            response.status_code,
+            round(duration_ms, 2),
+        )
+        return response
+    except Exception as exc:
+        duration_ms = (time.perf_counter() - start) * 1000
+        logger.error(
+            "method=%s path=%s status=500 duration_ms=%s error=%s",
+            request.method,
+            request.url.path,
+            round(duration_ms, 2),
+            exc,
+        )
+        return JSONResponse(status_code=500, content={"success": False, "error": "Internal server error"})
+
+
+@app.middleware("http")
+async def request_size_limit_middleware(request: Request, call_next):
+    if request.method == "POST":
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > MAX_REQUEST_BODY_BYTES:
+            return JSONResponse(
+                status_code=413,
+                content={"success": False, "error": "Request body too large"},
+            )
+    return await call_next(request)
+
+
+# ==================================================
+# DEMO DATASET — bundled into this service artifact
+# ==================================================
+DEMO_DATASET_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "demo_dataset.csv")
+
+@app.get("/demo-dataset")
+def serve_demo_dataset():
+    if not os.path.exists(DEMO_DATASET_PATH):
+        return JSONResponse(status_code=404, content={"success": False, "error": "Demo dataset not bundled"})
+    return FileResponse(
+        path=DEMO_DATASET_PATH,
+        media_type="text/csv",
+        filename="demo_dataset.csv",
+    )
+
+
+# ==================================================
+# ROUTERS
+# ==================================================
+# TIMEOUT HANDLER
+# ==================================================
+class TrainingTimeoutError(Exception):
+    pass
+
+def _timeout_handler(signum, frame):
+    raise TrainingTimeoutError("Training job exceeded allowed time limit")
+
 # ==================================================
 # ROUTERS
 # ==================================================
 app.include_router(goal_router)
+app.include_router(qc_router)
 
 # ==================================================
 # REQUEST MODEL
 # ==================================================
 class TrainRequest(BaseModel):
+    model_config = ConfigDict(strict=True)
 
-    filename: str
+    filename: str = Field(..., min_length=1, max_length=255)
+    task_type: str = Field(..., min_length=1, max_length=50)
+    target_column: str | None = Field(default=None, max_length=255)
+    algorithm: str = Field(..., min_length=1, max_length=100)
+    test_size: float = Field(default=20, ge=5, le=50)
+    random_state: int = Field(default=42, ge=0, le=9999)
+    n_estimators: int = Field(default=100, ge=1, le=5000)
+    max_depth: int | None = Field(default=None, ge=1, le=100)
+    epochs: int = Field(default=100, ge=1, le=10000)
+    learning_rate: float = Field(default=0.01, gt=0, le=1)
+    validation_strategy: str = Field(default="Train-Test Split", max_length=100)
 
-    task_type: str
+    @field_validator("task_type")
+    @classmethod
+    def validate_task_type(cls, value: str) -> str:
+        allowed = {"Regression", "Classification", "Clustering", "Anomaly Detection"}
+        if value not in allowed:
+            raise ValueError(f"task_type must be one of {sorted(allowed)}")
+        return value
 
-    target_column: str | None = None
-
-    algorithm: str
-
-    test_size: float = 20
-
-    random_state: int = 42
-
-    n_estimators: int = 100
-
-    max_depth: int | None = None
-
-    epochs: int = 100
-
-    learning_rate: float = 0.01
-
-    validation_strategy: str = "Train-Test Split"
+    @field_validator("algorithm")
+    @classmethod
+    def normalize_algorithm(cls, value: str) -> str:
+        return value.strip()
 
 
-# ==================================================
-# HOME
-# ==================================================
-@app.get("/")
-def home():
+class OptimizeRequest(BaseModel):
+    model_config = ConfigDict(strict=True)
 
-    return {
-        "message": "MODLIQ ML Engine Running"
-    }
+    filename: str = Field(..., min_length=1, max_length=255)
+    file_content: str | None = Field(default=None, max_length=25_000_000)
+    template_id: str = Field(default="yield_optimizer", min_length=1, max_length=100)
+    target: str | None = Field(default=None, max_length=255)
+    features: list[str] | None = Field(default=None, max_length=100)
+    goal_direction: str = Field(default="maximize", min_length=1, max_length=20)
+    threshold: float | None = Field(default=None)
+    constraints: dict | None = Field(default=None, max_length=500)
+    model: str | None = Field(default=None, max_length=100)
+    monthly_volume: float | None = Field(default=None, ge=0)
+    unit_value: float | None = Field(default=None, ge=0)
+    test_size: float = Field(default=20, ge=5, le=50)
+    random_state: int = Field(default=42, ge=0, le=9999)
 
-@app.get("/warmup")
-def warmup():
-    return {
-        "status": "ok",
-        "service": "modliq-ml-engine"
-    }
+    @field_validator("goal_direction")
+    @classmethod
+    def validate_goal_direction(cls, value: str) -> str:
+        allowed = {"maximize", "minimize", "maintain"}
+        if value not in allowed:
+            raise ValueError(f"goal_direction must be one of {sorted(allowed)}")
+        return value
 
 
 # ==================================================
@@ -134,88 +241,60 @@ def train_model(request: TrainRequest):
     print("================================")
 
     try:
-
-        # ==================================================
-        # LOAD DATASET
-        # ==================================================
         file_path = f"../backend/uploads/{request.filename}"
+        if not os.path.exists(file_path):
+            alt = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "demo_dataset.csv")
+            if os.path.exists(alt):
+                file_path = alt
+        _validate_csv_file(file_path)
 
-        df = pd.read_csv(file_path)
+        with training_timeout(MAX_TRAINING_SECONDS):
+            df = pd.read_csv(file_path)
 
-        # Remove null rows
-        df = df.dropna()
-
-        # ==================================================
-        # VALIDATE TARGET COLUMN
-        # ==================================================
-        if (
-            request.task_type != "Clustering"
-            and request.task_type != "Anomaly Detection"
-        ):
-
-            if not request.target_column:
-
+            if df.shape[0] == 0 or df.shape[1] == 0:
                 return {
                     "success": False,
-                    "error": "Target column is required"
+                    "error": "Dataset is empty or has no columns",
                 }
 
-            if request.target_column not in df.columns:
+            df = df.dropna()
 
+            if request.task_type not in {"Clustering", "Anomaly Detection"}:
+                if not request.target_column:
+                    return {
+                        "success": False,
+                        "error": "Target column is required",
+                    }
+
+                if request.target_column not in df.columns:
+                    return {
+                        "success": False,
+                        "error": f"Target column '{request.target_column}' not found",
+                    }
+
+            if request.target_column:
+                y = df[request.target_column]
+                X = df.drop(columns=[request.target_column])
+            else:
+                y = None
+                X = df
+
+            X = X.select_dtypes(include=["number"])
+            X = X.fillna(0)
+
+            if X.shape[1] == 0:
                 return {
                     "success": False,
-                    "error": f"Target column '{request.target_column}' not found"
+                    "error": "No numeric columns available",
                 }
 
-        # ==================================================
-        # FEATURES + TARGET
-        # ==================================================
-        if request.target_column:
+            feature_names = list(X.columns)
 
-            y = df[request.target_column]
-
-            X = df.drop(
-                columns=[request.target_column]
-            )
-
-        else:
-
-            y = None
-            X = df
-
-        # ==================================================
-        # KEEP NUMERIC FEATURES ONLY
-        # ==================================================
-        X = X.select_dtypes(
-            include=["number"]
-        )
-
-        # Fill remaining NaN
-        X = X.fillna(0)
-
-        # Check features
-        if X.shape[1] == 0:
-
-            return {
-                "success": False,
-                "error": "No numeric columns available"
-            }
-
-        feature_names = list(X.columns)
-
-        # ==================================================
-        # CLASSIFICATION LABEL ENCODING
-        # ==================================================
-        if (
-            request.task_type == "Classification"
-            and y is not None
-        ):
-
-            if y.dtype == "object":
-
+            if request.task_type == "Classification" and y is not None and y.dtype == "object":
                 encoder = LabelEncoder()
-
                 y = encoder.fit_transform(y)
+
+            # Remaining training logic continues below...
 
         # ==================================================
         # REGRESSION
@@ -585,6 +664,11 @@ def train_model(request: TrainRequest):
                     "Invalid task type"
             }
 
+    except _TimeoutException:
+        return {
+            "success": False,
+            "error": "Training job exceeded the allowed time limit",
+        }
     except Exception as error:
 
         return {
@@ -760,43 +844,10 @@ def _resolve_target(template, columns):
 
 
 # ==================================================
-# OPTIMIZE-YIELD REQUEST
-# ==================================================
-class OptimizeRequest(BaseModel):
-
-    filename: str
-
-    file_content: str | None = None
-
-    template_id: str = "yield_optimizer"
-
-    target: str | None = None
-
-    features: list[str] | None = None
-
-    goal_direction: str = "maximize"
-
-    threshold: float | None = None
-
-    constraints: dict | None = None
-
-    model: str | None = None
-
-    monthly_volume: float | None = None
-
-    unit_value: float | None = None
-
-    test_size: float = 20
-
-    random_state: int = 42
-
-
-# ==================================================
 # OPTIMIZE-YIELD ENDPOINT
 # ==================================================
 @app.post("/optimize-yield", dependencies=[Depends(verify_service_key)])
 def optimize_yield(request: OptimizeRequest):
-
     print("================================")
     print("OPTIMIZE-YIELD STARTED")
     print("Dataset:", request.filename)
@@ -808,16 +859,31 @@ def optimize_yield(request: OptimizeRequest):
             request.template_id, TEMPLATES["yield_optimizer"]
         )
 
-        # Load dataset: prefer base64 content (cross-service friendly),
-        # fall back to local file path for local/dev runs.
-        if request.file_content:
-            raw = base64.b64decode(request.file_content)
-            df = pd.read_csv(io.StringIO(raw.decode("utf-8")))
-        else:
-            file_path = f"../backend/uploads/{request.filename}"
-            df = pd.read_csv(file_path)
+        with training_timeout(MAX_TRAINING_SECONDS):
+            if request.file_content:
+                raw = base64.b64decode(request.file_content)
+                if len(raw) > MAX_CSV_BYTES:
+                    return {
+                        "success": False,
+                        "error": "Embedded dataset exceeds size limit",
+                    }
+                df = pd.read_csv(io.StringIO(raw.decode("utf-8")))
+            else:
+                file_path = f"../backend/uploads/{request.filename}"
+                if not os.path.exists(file_path):
+                    alt = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "demo_dataset.csv")
+                    if os.path.exists(alt):
+                        file_path = alt
+                _validate_csv_file(file_path)
+                df = pd.read_csv(file_path)
 
-        df = df.dropna()
+            if df.shape[0] == 0 or df.shape[1] == 0:
+                return {
+                    "success": False,
+                    "error": "Dataset is empty or has no columns",
+                }
+
+            df = df.dropna()
 
         target = request.target
         if not target or target not in df.columns:
@@ -1225,6 +1291,11 @@ def optimize_yield(request: OptimizeRequest):
             "plain_english_summary": summary,
         }
 
+    except _TimeoutException:
+        return {
+            "success": False,
+            "error": "Optimization job exceeded the allowed time limit",
+        }
     except Exception as error:
         return {
             "success": False,
@@ -1234,29 +1305,60 @@ def optimize_yield(request: OptimizeRequest):
 # ==================================================
 # DATASET HEALTH
 # ==================================================
+MAX_HEALTH_ROWS = 10_000
+
+
 class DatasetHealthRequest(BaseModel):
     rows: list[dict]
     targetColumn: str | None = None
     features: list[str] | None = None
     mode: str = "generic"
 
-from services.dataset_health import analyze_dataset_health
 
-MAX_HEALTH_ROWS = 10_000
+class _TimeoutException(Exception):
+    pass
+
+
+def _timeout_handler(signum, frame):
+    raise _TimeoutException("Training job exceeded allowed time limit")
+
+
+class training_timeout:
+    def __init__(self, seconds: int):
+        self.seconds = seconds
+
+    def __enter__(self):
+        if hasattr(signal, "SIGALRM"):
+            signal.signal(signal.SIGALRM, _timeout_handler)
+            signal.alarm(self.seconds)
+        return self
+
+    def __exit__(self, *args):
+        if hasattr(signal, "SIGALRM"):
+            signal.alarm(0)
+
+
+def _validate_csv_file(file_path: str):
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"CSV file not found: {file_path}")
+    size = os.path.getsize(file_path)
+    if size > MAX_CSV_BYTES:
+        raise ValueError(f"CSV file exceeds size limit: {size} bytes")
+
 
 @app.post("/dataset-health", dependencies=[Depends(verify_service_key)])
 def dataset_health(request: DatasetHealthRequest):
-    total_rows = len(request.rows)
-    sampled = total_rows > MAX_HEALTH_ROWS
-    rows_to_analyze = request.rows[:MAX_HEALTH_ROWS] if sampled else request.rows
-    rows_analyzed = len(rows_to_analyze)
+    with training_timeout(MAX_TRAINING_SECONDS):
+        total_rows = len(request.rows)
+        sampled = total_rows > MAX_HEALTH_ROWS
+        rows_to_analyze = request.rows[:MAX_HEALTH_ROWS] if sampled else request.rows
+        rows_analyzed = len(rows_to_analyze)
 
-    df = pd.DataFrame(rows_to_analyze)
-    result = analyze_dataset_health(df, request.targetColumn, request.features, request.mode)
+        df = pd.DataFrame(rows_to_analyze)
+        result = analyze_dataset_health(df, request.targetColumn, request.features, request.mode)
 
-    # Attach payload metadata
-    result["sampled"] = sampled
-    result["rowsAnalyzed"] = rows_analyzed
-    result["totalRows"] = total_rows
+        result["sampled"] = sampled
+        result["rowsAnalyzed"] = rows_analyzed
+        result["totalRows"] = total_rows
 
-    return result
+        return result
